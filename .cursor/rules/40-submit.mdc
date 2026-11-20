@@ -1,0 +1,15 @@
+---
+description: Pre-submission checklist. Use when asked to submit, push or package an attempt
+globs:
+alwaysApply: false
+---
+
+# Submit checklist (all must pass)
+1. `python3 tools/evaluate.py` → 0 misses on sample + bank.
+2. `make sample` → 0 misses; note simulated s.
+3. Container CPU (stderr rusage line) < 1.5 s; whole run well under 3 min.
+4. `make check` → "format ok". Every commit answered.
+5. Image builds from scratch (`docker build --no-cache`) within 10 min, no network beyond
+   PyPI/Docker Hub/sqlglot@eb11aec; maps readable by uid 65534.
+6. `git status` clean, pushed, repo public, ≤ 20 MB, no bank/ ground truth in the image.
+7. Record hash + all numbers in RESULTS.md, then submit. Max once per hour.

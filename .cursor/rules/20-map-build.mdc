@@ -1,0 +1,24 @@
+---
+description: Offline map build (coverage, import-time lines, fixture reads)
+globs: tools/build_map.sh, tools/make_map.py, tools/conftest_map.py, maps/**
+alwaysApply: false
+---
+
+# Map build rules
+
+- Build locally/offline, never in the Docker build. Commit the output in `maps/`.
+- Environment must match labeling: Python 3.13 (ideally inside the pinned image via docker),
+  `pip install -r requirements.lock`, sqlglot checkout on PYTHONPATH, `SKIP_INTEGRATION=0`.
+- coverage.py with `dynamic_context = test_function`. Context `tests.x.TestY.test_z`
+  ↔ id `tests/x.py::TestY::test_z`. Expect exactly 1 unmapped context (the skipped test).
+  More than 1 means the run is broken: stop.
+- `conftest_map.py` MUST make `ProcessPoolExecutor` run jobs inline, otherwise optimizer and
+  executor tests vanish from coverage. Lesson from RTS research: dependencies made in spawned
+  processes are invisible unless traced.
+- Also wrap `builtins.open` (and `pathlib.Path.open`/`read_text`) in that conftest to record
+  which test opens which non-.py file → `opens`.
+- Empty-context lines = import-time lines → `import_lines[file]`.
+- Output: `maps/index.json` {durations, file_union, import_lines, opens, testfile} and
+  `maps/lines/<sqlglot path>.json` {line: setIndex} plus a shared `maps/sets.json`.
+  Deduplicate test sets. Check total size < 15 MB.
+- Sanity check after every build: rerun the prototype on sample/ → misses must be 0.

@@ -1,0 +1,43 @@
+---
+description: Runtime selector rules (what runs inside the scored container)
+globs: selector/**
+alwaysApply: false
+---
+
+# selector/: runtime rules
+
+## Speed (CPU is charged)
+- Python stdlib only. No numpy, no coverage, no pytest, no subprocess, no threads.
+- Load nothing you don't need: the map is split per source file (`maps/lines/<path>.json`);
+  load only the files a patch touches. Keep `maps/index.json` (file_union, opens, testfile, durations) small.
+- Parse each original source at most once per run; cache ASTs in a dict.
+- Print with `json.dumps(obj, separators=(",", ":"))`. Flush once at the end.
+- Measure: at exit write `resource.getrusage(SELF)+getrusage(CHILDREN)` user+sys to stderr.
+
+## Pipeline (one function per module)
+patch.py → classify.py → rules.py → pack.py → main.py
+
+## Selection rules, in this order. The union across all files of a patch is selected.
+1. `sqlglot/**/*.py` with `ast.dump(old) == ast.dump(new)` (comment/whitespace only) → nothing.
+2. Changed old lines: '-' lines by number; pure '+' insertions → the lines on both sides.
+   Map each line to the FIRST line of its innermost enclosing `ast.stmt` (coverage records
+   multi-line statements by their first line). A `def`/`class`/decorator line → the whole body's lines.
+3. Line covered by tests → those tests.
+4. Line executed only at import (in `import_lines`, e.g. class attributes, dict entries, decorators)
+   → `file_union[file]`. Narrower versions (attribute-name references ∩ dialect users) only behind the gate.
+5. Line never executed → nothing.
+6. Docstring changed → doctest-running tests, if any exist (look in tests/ for doctest usage).
+7. `tests/fixtures/**` or other data file → `opens[file]` (tests that opened it).
+8. `tests/**/*.py` → every test in that file; `tests/helpers.py`, any conftest → full suite.
+9. Anything else (pyproject, setup, sqlglotc, rust, unknown) → full suite.
+- Deleted/renamed/new files: new `.py` under sqlglot/ that nothing imports → nothing; otherwise full suite.
+
+## Packing (pack.py)
+- For k in 1..8: LPT (longest first onto the least-loaded worker), cost = max load + 2000 ms·k.
+- If ≤ 12 tests, also try exact search; keep the cheapest. Durations: `round(seconds*1000)` ms.
+- Empty selection → `"workers": []`.
+
+## Never
+- Never call the network, never write outside /tmp, never read /data/answers.
+- Never let an exception kill the run: wrap each commit; on any error select the full suite
+  for that commit and log the error to stderr.

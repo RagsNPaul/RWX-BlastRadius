@@ -1,0 +1,46 @@
+---
+description: Blast Radius project contract: scoring math, hard limits, the build→test→submit loop
+globs:
+alwaysApply: true
+---
+
+# Blast Radius: project contract (read before every change)
+
+## The goal
+Pick, per patch to sqlglot@eb11aec, the tests that fail, and spread them over ≤8 workers.
+Score per commit = busiest worker's recorded seconds + 2 s × workers + **300 s if ANY failing test is left out**.
+The container's CPU seconds are added. Lower is better. Target: **< 200 s on the board**.
+
+## Facts from the 30 samples (do not re-derive)
+- Oracle (exactly the failing tests, best packing) = 94.4 s. Full suite with best k = ~1105 s.
+- 12/30 commits break nothing → `[]` costs 0.
+- A fixture edit (`tests/fixtures/**`) breaks exactly the test(s) that read that file.
+- Expensive tests: test_max_nodes 28.8 s, test_execute_tpcds 21.5 s, test_generator_memory 6.7 s.
+- test_optimizer / test_executor run their work in `ProcessPoolExecutor` (spawn). Coverage taken
+  without the inline-pool conftest misses those tests. This caused all 5 prototype misses.
+
+## Priority order (never invert)
+1. **Zero misses.** One miss = 300 s ≈ the whole rest of the score.
+2. CPU time of the container (target < 1.5 s for the whole batch).
+3. Seconds per commit (narrower selection, better packing).
+
+## Hard rules
+- When unsure, select MORE. A rule may only be narrowed after `tools/evaluate.py` shows
+  0 misses on all 30 samples AND on every mutant in `bank/`.
+- No table from a patch, or from a kind of edit, to the tests it breaks (contest rule; entries are read).
+  Maps built from the pinned commit (coverage, imports, fixture reads) are allowed.
+  Mutants are for checking only and never ship in the image.
+- stdout carries answer lines only: `{"commit": "...", "workers": [[...]]}`, one per commit,
+  every commit answered, ≤8 non-empty workers, no test twice. Logs go to stderr.
+- The runtime selector is stdlib-only, single process, no subprocesses, no network.
+- Map files are committed (repo ≤ 20 MB), readable by `nobody`, built with the pinned
+  Python 3.13 image and `requirements.lock`.
+- Keep the Dockerfile's pinned `python:3.13-slim@sha256:e48f…` base.
+
+## The loop (every iteration, about 45–60 min, matches 1 submission/hour)
+1. BUILD: one focused change (one rule or one optimisation). Small diff.
+2. TEST: `make sample` (exact simulated s + misses) → `python3 tools/evaluate.py`
+   (samples + 10–20 NEW mutants + the whole bank) → read cost per commit, misses, CPU s.
+3. GATE: submit only if misses == 0 everywhere AND total (simulated + CPU) improved.
+4. SUBMIT: push, submit the hash, log the board score in `RESULTS.md` (date, hash, sample s,
+   bank misses, CPU s, board s). Never resubmit an unchanged hash.

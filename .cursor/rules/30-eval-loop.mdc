@@ -1,0 +1,29 @@
+---
+description: Mutant generation, ground truth and evaluation (the TEST step of the loop)
+globs: tools/mutate.py, tools/groundtruth.sh, tools/evaluate.py, bank/**, RESULTS.md
+alwaysApply: false
+---
+
+# Evaluation loop rules
+
+## mutate.py: 10–20 NEW mutants per iteration, written as unified diffs into bank/<id>.patch
+Mix of kinds, weighted like the samples (code 55%, fixture 25%, comment 10%, multi-file 10%):
+- operators: `and`↔`or`, `==`↔`!=`, `<`↔`<=`, `is`→`==`, `not` removed, `+`↔`-`
+- constants: `True`↔`False`, ints ±1, string edits, inside class-level dicts / class attributes too
+- argument swaps (`seq_get(args, 0)`→`1`), `copy=False`→`True`
+- comment-only insertions (incl. before docstrings, at file top)
+- fixture SQL: one corrupted token on one line of `tests/fixtures/**`
+- multi: 2–3 of the above across files
+Bias new mutants toward the rule you just changed. Never reuse a mutant id.
+
+## groundtruth.sh: real failing set per mutant
+- Run in the pinned image with requirements.lock, `SKIP_INTEGRATION=0`, REAL process pools,
+  `pytest -p no:cacheprovider -n auto -rA`. A test fails on failure, error, timeout, SUBFAILED
+  or import error of its file. Store bank/<id>.json {failing: [...]}.
+- About 40 s per mutant on 4 cores. Run it in the background while you build the next change.
+
+## evaluate.py: one command, one table
+- Runs selector/main.py over sample/ and bank/ (mount as /data layout or pass paths).
+- Prints: misses (with commit ids), simulated s using score.py's exact arithmetic,
+  per-rule hit counts, selector CPU s. Exit non-zero if misses > 0.
+- Append one line to RESULTS.md per run.
