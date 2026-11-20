@@ -1,0 +1,6 @@
+output.jsonl
+__pycache__/
+.venv/
+sqlglot/
+.coverage*
+*.pkl
