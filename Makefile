@@ -11,7 +11,7 @@ RUN_FLAGS := --rm --platform linux/amd64 --network none --cpus 2 \
 	--volume $(SAMPLE)/commits:/data/commits:ro \
 	--volume $(SAMPLE)/tests.json:/data/tests.json:ro
 
-.PHONY: build sample check
+.PHONY: build sample check score-local
 
 build:
 	docker build --platform linux/amd64 --tag $(IMAGE) .
@@ -20,6 +20,11 @@ build:
 # scores what it printed.
 sample: build
 	docker run $(RUN_FLAGS) $(IMAGE) > $(OUTPUT)
+	python3 score.py $(SAMPLE) $(SAMPLE)/answers.json $(OUTPUT)
+
+# Local score without Docker (needs maps/map.json.gz and a sqlglot checkout).
+score-local:
+	BLAST_DATA=$(SAMPLE) python3 selector.py > $(OUTPUT)
 	python3 score.py $(SAMPLE) $(SAMPLE)/answers.json $(OUTPUT)
 
 # The output's rules only: every line well formed and every commit answered.
