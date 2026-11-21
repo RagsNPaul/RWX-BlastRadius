@@ -10,6 +10,9 @@ alwaysApply: false
 - Python stdlib only. No numpy, no coverage, no pytest, no threads.
   `IMPORT_CHECK` defaults to on (`IMPORT_CHECK=0` keeps the all-tests fallback). It may run one `python -S`
   subprocess, cwd `/tmp`, to fingerprint a patched copy of the package. Its CPU is charged.
+  `EXPENSIVE_CHECK=1` may run a second `python -S` on that same copy to re-optimize the TPC fixture
+  queries the changed files actually call. A failed import selects every test. Over 5 s of check CPU,
+  the wider selection stands.
 - Load nothing you don't need: the map is split per source file (`maps/lines/<path>.json`);
   load only the files a patch touches. Keep `maps/index.json` (file_union, opens, testfile, durations) small.
 - Parse each original source at most once per run; cache ASTs in a dict.
@@ -53,6 +56,12 @@ patch.py → classify.py → rules.py → pack.py → main.py
      that changes outside the edited class, still selects every test. A fingerprint
      that is unchanged, or that changes only on keys of the edited class, keeps the
      line rules and adds the class-usage tests of the changed keys.
+     `EXPENSIVE_CHECK=1` then drops a selected test over 3 s that coverage added and no changed
+     fixture, source read, or test file also names. The TPC executor tests drop when the patch
+     stays out of `sqlglot/executor/` and `optimize().sql()` matches the pinned map on the queries
+     that call a changed file. `test_max_nodes` stays for `parser.py`, `tokens.py`,
+     `tokenizer_core.py`, `expressions/core.py`, or a line in `maps/max_nodes_lines.json`.
+     `test_generator_memory` stays for `generator.py` or `expressions/core.py`.
    - module-level code (not in a class) keeps `file_union`; if tests also ran it → every test
 5. Line never executed → nothing.
 6. Docstring changed → doctest-running tests, if any exist (look in tests/ for doctest usage).

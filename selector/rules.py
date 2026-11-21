@@ -112,6 +112,20 @@ class Maps:
                 raise ValueError(f"test {test['number']} is not in {test['file']} in the maps")
         self._load_classes(tests)
 
+    def tpc(self):
+        """Pinned TPC-H / TPC-DS optimize().sql() hashes and the files each query calls."""
+        if self._tpc is None:
+            with open(os.path.join(self.maps_dir, "tpc.json"), encoding="utf-8") as handle:
+                self._tpc = json.load(handle)
+        return self._tpc
+
+    def max_node_lines(self):
+        """Lines test_max_nodes runs that also sit on the default dialect's parse path."""
+        if self._max_lines is None:
+            with open(os.path.join(self.maps_dir, "max_nodes_lines.json"), encoding="utf-8") as handle:
+                self._max_lines = set(json.load(handle))
+        return self._max_lines
+
     def tests_of(self, index):
         if self._sets is None:
             with open(os.path.join(self.maps_dir, "sets.json")) as f:
@@ -1137,7 +1151,7 @@ def _run_import_check(files, maps, keep=False):
     try:
         patched = _patched_fingerprint(files, maps, keep)
         if patched is None:
-            return "all", (), _cpu_seconds() - start
+            return "failed", (), _cpu_seconds() - start
         if maps._import_fp is None:
             with open(os.path.join(maps.maps_dir, "import_fp.json"), encoding="utf-8") as handle:
                 maps._import_fp = json.load(handle)
@@ -1402,6 +1416,146 @@ def _file(file, files, maps, blame=None, check=None):
     return maps.everything, "all:other"  # rule 9
 
 
+# Tests over 3s. Numbers are the pinned tests.json ids, not the leaf names (athena also has test_max_nodes).
+_TPC_IDS = ((1106, "tpcds"), (1107, "tpch"), (1123, "opt_tpch"))
+_MAX_ID = (1490, "max_nodes")
+_GEN_ID = (1224, "gen_mem")
+_MAX_FILES = frozenset({
+    "sqlglot/parser.py",
+    "sqlglot/tokens.py",
+    "sqlglot/tokenizer_core.py",
+    "sqlglot/expressions/core.py",
+})
+_GEN_FILES = frozenset({"sqlglot/generator.py", "sqlglot/expressions/core.py"})
+_COVERAGE_RULES = frozenset({"line", "class", "import->file", "blind"})
+_CHECK_CPU_LIMIT = 5.0
+
+
+def _paths(files):
+    found = set()
+    for file in files:
+        for path in (file.old, file.new):
+            if path:
+                found.add(path)
+    return found
+
+
+def _edited_lines(files):
+    """Original `path:line` keys an edit touches. A '+' row names the old line it is inserted before."""
+    found = set()
+    for file in files:
+        if not file.old:
+            continue
+        for rows in file.hunks:
+            for kind, number, _row in rows:
+                if kind != " ":
+                    found.add(f"{file.old}:{number}")
+    return found
+
+
+def _fixture_keeps(number, files, maps):
+    """A changed fixture, a source the test reads, or its own test file keeps the test."""
+    for path in _paths(files):
+        if (
+            number in maps.opens.get(path, ())
+            or number in maps.py_reads.get(path, ())
+            or number in maps.testfile.get(path, ())
+        ):
+            return True
+    return False
+
+
+def _coverage_added(number, blame):
+    for rule, _where, tests in blame:
+        if number not in tests:
+            continue
+        if rule in _COVERAGE_RULES or rule.startswith("all:"):
+            return True
+    return False
+
+
+def _can_drop(number, selected, files, maps, blame):
+    if number not in selected or maps.durations[number] <= _SLOW_MS:
+        return False
+    if _fixture_keeps(number, files, maps):
+        return False
+    return _coverage_added(number, blame)
+
+
+def _tpc_unchanged(files, maps):
+    """True when patched optimize().sql() matches the pinned hashes. None keeps the tests."""
+    paths = _paths(files)
+    if any(path.startswith("sqlglot/executor/") for path in paths):
+        return False
+    data = maps.tpc()
+    wanted, seen = [], set()
+    for path in paths:
+        if not (path.startswith("sqlglot/") and path.endswith(".py")):
+            continue
+        for query_id in data["files"].get(path, ()):
+            if query_id not in seen:
+                seen.add(query_id)
+                wanted.append(query_id)
+    if not wanted:
+        return True
+    if not _prepare_tree(files, maps):
+        return None
+    queries = data["queries"]
+    schemas, payload = {}, []
+    for query_id in wanted:
+        row = queries[query_id]
+        schemas[row["s"]] = data["schemas"][row["s"]]
+        payload.append({"id": query_id, "sql": row["sql"], "schema": row["s"]})
+    script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "probe.py")
+    proc = _run_python(script, json.dumps({"schemas": schemas, "queries": payload}), timeout=6)
+    if proc.returncode != 0:
+        return None
+    got = _json_out(proc.stdout)
+    if not isinstance(got, dict):
+        return None
+    for query_id in wanted:
+        if got.get(query_id) != queries[query_id]["hash"]:
+            return False
+    return True
+
+
+def _keep_max_nodes(files, maps):
+    if _paths(files) & _MAX_FILES:
+        return True
+    return bool(_edited_lines(files) & maps.max_node_lines())
+
+
+def _keep_generator(files):
+    return bool(_paths(files) & _GEN_FILES)
+
+
+def _drop_expensive(selected, files, maps, blame, import_failed):
+    """Remove expensive tests the patch cannot change. Returns the short names dropped and the CPU."""
+    start = _cpu_seconds()
+    names = []
+    try:
+        if not import_failed:
+            tpc_ids = [number for number, _name in _TPC_IDS if _can_drop(number, selected, files, maps, blame)]
+            if tpc_ids:
+                same = _tpc_unchanged(files, maps)
+                if same is True:
+                    names.extend(name for number, name in _TPC_IDS if number in tpc_ids)
+            if _can_drop(_MAX_ID[0], selected, files, maps, blame) and not _keep_max_nodes(files, maps):
+                names.append(_MAX_ID[1])
+            if _can_drop(_GEN_ID[0], selected, files, maps, blame) and not _keep_generator(files):
+                names.append(_GEN_ID[1])
+        _cleanup_tree()
+        if import_failed or _cpu_seconds() - start > _CHECK_CPU_LIMIT:
+            return [], _cpu_seconds() - start
+        by_name = {name: number for number, name in (*_TPC_IDS, _MAX_ID, _GEN_ID)}
+        for name in names:
+            selected.discard(by_name[name])
+        return names, _cpu_seconds() - start
+    except (OSError, ValueError, subprocess.TimeoutExpired, json.JSONDecodeError, KeyError, TypeError):
+        _cleanup_tree()
+        return [], _cpu_seconds() - start
+
+
 def select(files, maps, blame=None):
     """-> (test numbers, [reason per file]): the union over the files of one patch.
 
@@ -1410,19 +1564,32 @@ def select(files, maps, blame=None):
     """
     selected, reasons = set(), []
     box = {}
+    record = blame if blame is not None else ([] if _expensive_check() else None)
 
     def check():
         if "value" not in box:
-            box["value"] = _run_import_check(files, maps)
+            box["value"] = _run_import_check(files, maps, keep=_expensive_check())
         return box["value"]
 
     runner = check if _import_check() else None
-    for file in files:
-        tests, reason = _file(file, files, maps, blame, runner)
-        selected.update(tests)
-        reasons.append(reason)
-        if len(selected) == len(maps.everything):
-            break
-    if "value" in box:
-        reasons.append(f"check={box['value'][2]:.3f}s")
+    done = False
+    try:
+        for file in files:
+            tests, reason = _file(file, files, maps, record, runner)
+            if not done:
+                selected.update(tests)
+                reasons.append(reason)
+                done = len(selected) == len(maps.everything)
+            if done and not _expensive_check():
+                break
+        if "value" in box:
+            reasons.append(f"check={box['value'][2]:.3f}s")
+        if _expensive_check():
+            failed = box.get("value", ("",))[0] == "failed"
+            dropped, cpu = _drop_expensive(selected, files, maps, record or [], failed)
+            if dropped:
+                reasons.append("drop=" + "+".join(dropped))
+            reasons.append(f"xcheck={cpu:.3f}s")
+    finally:
+        _cleanup_tree()
     return selected, reasons
