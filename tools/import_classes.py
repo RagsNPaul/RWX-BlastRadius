@@ -1,4 +1,4 @@
-import sys, json
+import os, sys, json
 seen=set()
 def prof(frame, event, arg):
     if event=='call' and frame.f_code.co_name=='__init__' and 'sqlglot' in frame.f_code.co_filename:
@@ -11,4 +11,6 @@ for m in pkgutil.walk_packages(sqlglot.__path__, 'sqlglot.'):
     except Exception: pass
 sys.setprofile(None)
 names=sorted({f'{b.__module__}:{b.__qualname__}' for t in seen for b in t.__mro__ if b.__module__.startswith('sqlglot')})
-json.dump(names,open('/home/claude/inst/import_classes.json','w')); print(len(names), names[:15])
+out=os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'maps', 'import_classes.json')
+json.dump(names, open(out, 'w'))
+print(len(names), names[:15])

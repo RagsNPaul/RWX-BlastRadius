@@ -1,0 +1,12 @@
+diff --git a/sqlglot/parser.py b/sqlglot/parser.py
+--- a/sqlglot/parser.py
++++ b/sqlglot/parser.py
+@@ -5475,7 +5475,7 @@
+         if not is_derived and not (
+             # ClickHouse's `FORMAT Values` is equivalent to `VALUES`
+             self._match_text_seq("VALUES")
+-            or self._match_text_seq("FORMAT", "VALUES")
++            and self._match_text_seq("FORMAT", "VALUES")
+             # MySQL accepts VALUE as a synonym for VALUES in INSERT statements.
+             or (allow_value_synonym and self._match_text_seq("VALUE"))
+         ):

@@ -1,0 +1,12 @@
+diff --git a/sqlglot/generators/oracle.py b/sqlglot/generators/oracle.py
+--- a/sqlglot/generators/oracle.py
++++ b/sqlglot/generators/oracle.py
+@@ -60,7 +60,7 @@
+         exp.DType.DOUBLE: "DOUBLE PRECISION",
+         exp.DType.VARCHAR: "VARCHAR2",
+         exp.DType.NVARCHAR: "NVARCHAR2",
+-        exp.DType.NCHAR: "NCHAR",
++        exp.DType.NCHAR: "NCHARX",
+         exp.DType.TEXT: "CLOB",
+         exp.DType.TIMETZ: "TIME",
+         exp.DType.TIMESTAMPNTZ: "TIMESTAMP",

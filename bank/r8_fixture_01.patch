@@ -1,0 +1,12 @@
+diff --git a/tests/fixtures/optimizer/tpc-ds/tpc-ds.sql b/tests/fixtures/optimizer/tpc-ds/tpc-ds.sql
+--- a/tests/fixtures/optimizer/tpc-ds/tpc-ds.sql
++++ b/tests/fixtures/optimizer/tpc-ds/tpc-ds.sql
+@@ -9975,7 +9975,7 @@
+   FROM "catalog_sales" AS "catalog_sales"
+   JOIN "date_dim_2" AS "date_dim"
+     ON "catalog_sales"."cs_sold_date_sk" = "date_dim"."d_date_sk"
+-  UNION ALL
++  UNION ALLX
+   SELECT
+     "store_sales"."ss_ext_sales_price" AS "ext_price",
+     "store_sales"."ss_item_sk" AS "sold_item_sk",

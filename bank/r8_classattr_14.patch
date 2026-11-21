@@ -1,0 +1,12 @@
+diff --git a/sqlglot/expressions/datatypes.py b/sqlglot/expressions/datatypes.py
+--- a/sqlglot/expressions/datatypes.py
++++ b/sqlglot/expressions/datatypes.py
+@@ -183,7 +183,7 @@
+         "expressions": False,
+         "nested": False,
+         "values": False,
+-        "kind": False,
++        "kind": True,
+         "nullable": False,
+         "collate": False,
+     }

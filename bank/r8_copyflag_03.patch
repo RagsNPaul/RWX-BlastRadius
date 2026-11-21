@@ -1,0 +1,12 @@
+diff --git a/sqlglot/optimizer/qualify_columns.py b/sqlglot/optimizer/qualify_columns.py
+--- a/sqlglot/optimizer/qualify_columns.py
++++ b/sqlglot/optimizer/qualify_columns.py
+@@ -1144,7 +1144,7 @@
+             alias(
+                 exp.Dot(this=operand.copy(), expression=field.this.copy()),
+                 field.this.copy(),
+-                copy=False,
++                copy=True,
+             ).assert_is(exp.Alias)
+         )
+ 

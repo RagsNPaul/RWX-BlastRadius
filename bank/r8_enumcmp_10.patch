@@ -1,0 +1,12 @@
+diff --git a/sqlglot/optimizer/simplify.py b/sqlglot/optimizer/simplify.py
+--- a/sqlglot/optimizer/simplify.py
++++ b/sqlglot/optimizer/simplify.py
+@@ -1966,7 +1966,7 @@
+         for k in arg_types:
+             v = node.args.get(k)
+ 
+-            if v is not None:
++            if v != None:
+                 # repr() plain strings so their content can't mimic gen's structural text
+                 kvs.append([f":{k}", repr(v) if isinstance(v, str) else v])
+         if kvs:

@@ -1,0 +1,12 @@
+diff --git a/sqlglot/generators/postgres.py b/sqlglot/generators/postgres.py
+--- a/sqlglot/generators/postgres.py
++++ b/sqlglot/generators/postgres.py
+@@ -690,7 +690,7 @@
+         case_expr = (
+             exp.Case()
+             .when(exp.Is(this=value, expression=exp.null()), exp.null(), copy=False)
+-            .else_(coalesce_expr, copy=False)
++            .else_(coalesce_expr, copy=True)
+         )
+ 
+         return self.sql(case_expr)

@@ -19,12 +19,29 @@ patch.py → classify.py → rules.py → pack.py → main.py
 
 ## Selection rules, in this order. The union across all files of a patch is selected.
 1. `sqlglot/**/*.py` with `ast.dump(old) == ast.dump(new)` (comment/whitespace only) → nothing.
+   `EQUIV_ENUM` defaults to on. A statement whose only AST difference is `is`↔`==` or `is not`↔`!=`
+   on an attribute of an Enum that does not override equality (`maps/enums.json`) is the same.
+   `is None`↔`== None` counts too, only when the other name is annotated or assigned in that
+   function as `str`, `int`, `bool`, `Token`, or `TokenType`. Anything else, including an
+   `Expression`, stays a real change. `IntEnum` and `str` mixins stay real changes for `is`↔`==`
+   against a member.
+   `EQUIV_DEAD` defaults to on (`EQUIV_DEAD=0` keeps the line). Every changed line is in an
+   if/elif/else/except/loop body that no test runs (no line-map entry, not an import line), and
+   the condition line is untouched → nothing for that file. A body that still has a covered line stays.
 2. Changed old lines: '-' lines by number; pure '+' insertions → the lines on both sides.
    Map each line to the FIRST line of its innermost enclosing `ast.stmt` (coverage records
    multi-line statements by their first line). A `def`/`class`/decorator line → the whole body's lines.
 3. Line covered by tests → those tests.
-4. Line executed only at import (in `import_lines`, e.g. class attributes, dict entries, decorators)
-   → `file_union[file]`. Narrower versions (attribute-name references ∩ dialect users) only behind the gate.
+4. Line executed at import (`import_lines`): `file_union[file]`, plus
+   - class-body edit of class C (not inside a function) → tests that instantiated C or a subclass
+     (`maps/inst.json`, key `module:QualName`, MRO already expanded), unioned with `file_union`;
+     if C is in `maps/import_classes.json` → every test.
+     `NARROW_CLASS` defaults to on. With it on, a class that is not created at import and that has an inst entry
+     drops `file_union` and selects those tests plus tests whose source or an opened fixture
+     contains a string literal the edit removed or added (`maps/words.json`, case-insensitive).
+     No inst entry, or a literal that is not a word, keeps `file_union`.
+   - a changed line inside a function that also runs at import → every test
+   - module-level code (not in a class) keeps `file_union`; if tests also ran it → every test
 5. Line never executed → nothing.
 6. Docstring changed → doctest-running tests, if any exist (look in tests/ for doctest usage).
 7. `tests/fixtures/**` or other data file → `opens[file]` (tests that opened it).
@@ -34,7 +51,8 @@ patch.py → classify.py → rules.py → pack.py → main.py
 
 ## Packing (pack.py)
 - For k in 1..8: LPT (longest first onto the least-loaded worker), cost = max load + 2000 ms·k.
-- If ≤ 12 tests, also try exact search; keep the cheapest. Durations: `round(seconds*1000)` ms.
+- If ≤ 12 tests, search every assignment to those k workers, pruning a partial placement that cannot beat the best cost. Durations: `round(seconds*1000)` ms.
+- If more than 12, after LPT one pass swaps a test on the busiest worker with a test on each other worker when that lowers the max load.
 - Empty selection → `"workers": []`.
 
 ## Never

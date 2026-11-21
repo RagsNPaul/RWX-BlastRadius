@@ -1,0 +1,12 @@
+diff --git a/tests/fixtures/optimizer/tpc-ds/tpc-ds.sql b/tests/fixtures/optimizer/tpc-ds/tpc-ds.sql
+--- a/tests/fixtures/optimizer/tpc-ds/tpc-ds.sql
++++ b/tests/fixtures/optimizer/tpc-ds/tpc-ds.sql
+@@ -822,7 +822,7 @@
+     SUM("salesreturns"."profit") AS "profit",
+     SUM("salesreturns"."return_amt") AS "returns1",
+     SUM("salesreturns"."net_loss") AS "profit_loss"
+-  FROM "salesreturns_3" AS "salesreturns"
++  FROM "salesreturns_3X" AS "salesreturns"
+   JOIN "date_dim_2" AS "date_dim"
+     ON "date_dim"."d_date_sk" = "salesreturns"."date_sk"
+   JOIN "web_site" AS "web_site"

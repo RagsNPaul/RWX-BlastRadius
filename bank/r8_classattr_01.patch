@@ -1,0 +1,12 @@
+diff --git a/sqlglot/expressions/properties.py b/sqlglot/expressions/properties.py
+--- a/sqlglot/expressions/properties.py
++++ b/sqlglot/expressions/properties.py
+@@ -367,7 +367,7 @@
+ 
+ 
+ class RollupIndex(Expression):
+-    arg_types = {"this": True, "expressions": True, "from_index": False, "properties": False}
++    arg_types = {"this": False, "expressions": True, "from_index": False, "properties": False}
+ 
+ 
+ class RowAccessProperty(Property):

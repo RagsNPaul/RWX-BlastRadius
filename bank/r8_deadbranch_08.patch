@@ -1,0 +1,12 @@
+diff --git a/sqlglot/generators/duckdb.py b/sqlglot/generators/duckdb.py
+--- a/sqlglot/generators/duckdb.py
++++ b/sqlglot/generators/duckdb.py
+@@ -4916,7 +4916,7 @@
+             and (unit := to_type.unit)
+             and expression.args.get("requires_string")
+         ):
+-            interval_type = exp.DataType.build("INTERVAL")
++            interval_type = exp.DataType.build("INTERVALX")
+             if isinstance(unit, exp.IntervalSpan):
+                 self.unsupported(
+                     "TRY_CAST to INTERVAL with span (e.g. HOUR TO MINUTE) is not supported in DuckDB"

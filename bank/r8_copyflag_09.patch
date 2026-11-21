@@ -1,0 +1,12 @@
+diff --git a/sqlglot/transforms.py b/sqlglot/transforms.py
+--- a/sqlglot/transforms.py
++++ b/sqlglot/transforms.py
+@@ -169,7 +169,7 @@
+         else:
+             window.set("order", exp.Order(expressions=[c.copy() for c in distinct_cols]))
+ 
+-        expression.select(exp.alias_(window, row_number_window_alias), copy=False)
++        expression.select(exp.alias_(window, row_number_window_alias), copy=True)
+ 
+         # We add aliases to the projections so that we can safely reference them in the outer query
+         new_selects: list[exp.Expr] = []

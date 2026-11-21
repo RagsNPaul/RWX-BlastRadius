@@ -1,0 +1,12 @@
+diff --git a/sqlglot/generators/duckdb.py b/sqlglot/generators/duckdb.py
+--- a/sqlglot/generators/duckdb.py
++++ b/sqlglot/generators/duckdb.py
+@@ -3129,7 +3129,7 @@
+         # Default: MAKE_TIME
+         if nano:
+             expression.set(
+-                "sec", expression.args["sec"] + nano.pop() / exp.Literal.number(1000000000.0)
++                "sec", expression.args["sec"] + nano.pop() / exp.Literal.number(1000000000.1)
+             )
+ 
+         return rename_func("MAKE_TIME")(self, expression)

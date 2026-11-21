@@ -1,0 +1,12 @@
+diff --git a/sqlglot/transforms.py b/sqlglot/transforms.py
+--- a/sqlglot/transforms.py
++++ b/sqlglot/transforms.py
+@@ -478,7 +478,7 @@
+                             table=[map_key_alias, map_value_alias],
+                         )
+                         if expression.args.get("from_"):
+-                            expression.join(unnest, copy=False, join_type="CROSS")
++                            expression.join(unnest, copy=True, join_type="CROSS")
+                         else:
+                             expression.from_(unnest, copy=False)
+ 

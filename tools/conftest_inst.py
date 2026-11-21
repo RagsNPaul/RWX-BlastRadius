@@ -50,4 +50,7 @@ def pytest_sessionfinish(session):
             for b in ty.__mro__:
                 if b.__module__.startswith('sqlglot'): names.add(f'{b.__module__}:{b.__qualname__}')
         out[t]=sorted(names)
-    json.dump(out,open('/home/claude/inst/inst.json','w'))
+    here = os.path.dirname(os.path.abspath(__file__))
+    # tools/conftest_inst.py and the copy at sqlglot/conftest.py both sit one level below the repo.
+    dest = os.path.join(os.path.dirname(here), 'maps', 'inst.json')
+    json.dump(out, open(dest, 'w'))

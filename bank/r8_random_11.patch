@@ -1,0 +1,12 @@
+diff --git a/sqlglot/generators/spark2.py b/sqlglot/generators/spark2.py
+--- a/sqlglot/generators/spark2.py
++++ b/sqlglot/generators/spark2.py
+@@ -178,7 +178,7 @@
+                     move_schema_columns_to_partitioned_by,
+                 ]
+             ),
+-            exp.DateFromParts: rename_func("MAKE_DATE"),
++            exp.DateFromParts: rename_func("MAKE_DATEX"),
+             exp.DateTrunc: lambda self, e: self.func(
+                 "TRUNC", e.this, weekstart_unit_to_str(self, e)
+             ),

@@ -1,0 +1,12 @@
+diff --git a/sqlglot/dialects/dialect.py b/sqlglot/dialects/dialect.py
+--- a/sqlglot/dialects/dialect.py
++++ b/sqlglot/dialects/dialect.py
+@@ -2963,7 +2963,7 @@
+         if isinstance(value, exp.Kwarg):
+             value = value.expression
+ 
+-        if value is None:
++        if value == None:
+             continue
+ 
+         value_sql = value.name if value.is_string else self.sql(value)

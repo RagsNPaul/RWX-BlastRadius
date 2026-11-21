@@ -1,0 +1,12 @@
+diff --git a/tests/fixtures/optimizer/tpc-ds/tpc-ds.sql b/tests/fixtures/optimizer/tpc-ds/tpc-ds.sql
+--- a/tests/fixtures/optimizer/tpc-ds/tpc-ds.sql
++++ b/tests/fixtures/optimizer/tpc-ds/tpc-ds.sql
+@@ -9323,7 +9323,7 @@
+         THEN "catalog_sales"."cs_net_paid" * "catalog_sales"."cs_quantity"
+         ELSE 0
+       END
+-    ) AS "jun_net",
++    ) AS "jun_netX",
+     SUM(
+       CASE
+         WHEN "date_dim"."d_moy" = 7

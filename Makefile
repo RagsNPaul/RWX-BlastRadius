@@ -11,7 +11,12 @@ RUN_FLAGS := --rm --platform linux/amd64 --network none --cpus 2 \
 	--volume $(SAMPLE)/commits:/data/commits:ro \
 	--volume $(SAMPLE)/tests.json:/data/tests.json:ro
 
-.PHONY: build sample check
+PY ?= $(CURDIR)/.venv/bin/python
+SQLGLOT ?= $(CURDIR)/sqlglot
+MAPS ?= $(CURDIR)/maps
+BANK ?= $(CURDIR)/bank
+
+.PHONY: build sample check eval
 
 build:
 	docker build --platform linux/amd64 --tag $(IMAGE) .
@@ -27,3 +32,8 @@ sample: build
 check: build
 	docker run $(RUN_FLAGS) $(IMAGE) > $(OUTPUT)
 	python3 score.py $(SAMPLE) $(SAMPLE)/answers.json $(OUTPUT) > /dev/null && echo "format ok"
+
+# Ground truth for bank patches that do not yet have a json, then score sample and bank.
+eval:
+	$(PY) tools/eval/gt.py --sqlglot $(SQLGLOT) --python $(PY) --tests $(SAMPLE)/tests.json --bank $(BANK)
+	$(PY) tools/eval/ev.py --sqlglot $(SQLGLOT) --python $(PY) --tests $(SAMPLE)/tests.json --bank $(BANK) --maps $(MAPS)

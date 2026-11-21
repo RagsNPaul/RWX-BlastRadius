@@ -1,0 +1,11 @@
+diff --git a/sqlglot/helper.py b/sqlglot/helper.py
+--- a/sqlglot/helper.py
++++ b/sqlglot/helper.py
+@@ -291,6 +291,7 @@
+ def split_num_words(
+     value: str, sep: str, min_num_words: int, fill_from_start: bool = True
+ ) -> list[str | None]:
++    # comment
+     """
+     Perform a split on a value and return N words as a result with `None` used for words that don't exist.
+ 

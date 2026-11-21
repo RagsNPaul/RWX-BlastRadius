@@ -1,0 +1,11 @@
+diff --git a/sqlglot/parser.py b/sqlglot/parser.py
+--- a/sqlglot/parser.py
++++ b/sqlglot/parser.py
+@@ -10903,6 +10903,7 @@
+ 
+         return query
+ 
++    # comment
+     def _parse_declareitem(self) -> exp.DeclareItem | None:
+         self._match_texts(("VAR", "VARIABLE"))
+ 

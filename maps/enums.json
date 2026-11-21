@@ -1,0 +1,347 @@
+{
+ "any_overrides_eq": true,
+ "classes": {
+  "sqlglot.dialects.dialect:AliasPrecedence": {
+   "eq": true
+  },
+  "sqlglot.dialects.dialect:Dialects": {
+   "eq": true
+  },
+  "sqlglot.dialects.dialect:NormalizationStrategy": {
+   "eq": true
+  },
+  "sqlglot.dialects.dialect:UsingColumnOrder": {
+   "eq": true
+  },
+  "sqlglot.errors:ErrorLevel": {
+   "eq": false
+  },
+  "sqlglot.expressions.datatypes:DType": {
+   "eq": false
+  },
+  "sqlglot.expressions.properties:PropertiesLocation": {
+   "eq": false
+  },
+  "sqlglot.helper:AutoName": {
+   "eq": false
+  },
+  "sqlglot.optimizer.scope:ScopeType": {
+   "eq": false
+  },
+  "sqlglot.parser:IsPredicatePrecedence": {
+   "eq": false
+  },
+  "sqlglot.tokenizer_core:TokenType": {
+   "eq": true
+  },
+  "sqlglot.trie:TrieResult": {
+   "eq": false
+  }
+ },
+ "names": {
+  "sqlglot/time.py": [
+   "TrieResult"
+  ],
+  "sqlglot/__init__.py": [
+   "ErrorLevel"
+  ],
+  "sqlglot/parser.py": [
+   "ErrorLevel",
+   "IsPredicatePrecedence",
+   "TrieResult"
+  ],
+  "sqlglot/generator.py": [
+   "ErrorLevel"
+  ],
+  "sqlglot/helper.py": [
+   "AutoName"
+  ],
+  "sqlglot/errors.py": [
+   "AutoName",
+   "ErrorLevel"
+  ],
+  "sqlglot/lineage.py": [
+   "ScopeType"
+  ],
+  "sqlglot/trie.py": [
+   "TrieResult"
+  ],
+  "sqlglot/schema.py": [
+   "TrieResult"
+  ],
+  "sqlglot/parsers/redshift.py": [
+   "IsPredicatePrecedence"
+  ],
+  "sqlglot/parsers/clickhouse.py": [
+   "IsPredicatePrecedence"
+  ],
+  "sqlglot/parsers/dremio.py": [
+   "IsPredicatePrecedence"
+  ],
+  "sqlglot/parsers/singlestore.py": [
+   "IsPredicatePrecedence"
+  ],
+  "sqlglot/parsers/spark2.py": [
+   "IsPredicatePrecedence"
+  ],
+  "sqlglot/parsers/sqlite.py": [
+   "IsPredicatePrecedence"
+  ],
+  "sqlglot/parsers/hive.py": [
+   "IsPredicatePrecedence"
+  ],
+  "sqlglot/parsers/postgres.py": [
+   "IsPredicatePrecedence"
+  ],
+  "sqlglot/parsers/drill.py": [
+   "IsPredicatePrecedence"
+  ],
+  "sqlglot/parsers/oracle.py": [
+   "IsPredicatePrecedence"
+  ],
+  "sqlglot/parsers/duckdb.py": [
+   "IsPredicatePrecedence"
+  ],
+  "sqlglot/parsers/athena.py": [
+   "ErrorLevel"
+  ],
+  "sqlglot/parsers/mysql.py": [
+   "IsPredicatePrecedence"
+  ],
+  "sqlglot/optimizer/unnest_subqueries.py": [
+   "ScopeType"
+  ],
+  "sqlglot/optimizer/scope.py": [
+   "ScopeType"
+  ],
+  "sqlglot/dialects/dialect.py": [
+   "AutoName"
+  ],
+  "sqlglot/expressions/builders.py": [
+   "DType"
+  ],
+  "sqlglot/expressions/temporal.py": [
+   "DType"
+  ],
+  "sqlglot/expressions/properties.py": [
+   "AutoName",
+   "PropertiesLocation"
+  ],
+  "sqlglot/expressions/datatypes.py": [
+   "AutoName",
+   "DType",
+   "ErrorLevel"
+  ],
+  "sqlglot/generators/bigquery.py": [
+   "ErrorLevel"
+  ]
+ },
+ "scalars": {
+  "sqlglot/__init__.py": [
+   "Token",
+   "TokenType"
+  ],
+  "sqlglot/tokens.py": [
+   "Token",
+   "TokenType"
+  ],
+  "sqlglot/tokenizer_core.py": [
+   "Token",
+   "TokenType"
+  ],
+  "sqlglot/parser.py": [
+   "Token",
+   "TokenType"
+  ],
+  "sqlglot/generator.py": [
+   "TokenType"
+  ],
+  "sqlglot/anonymize.py": [
+   "Token",
+   "TokenType"
+  ],
+  "sqlglot/jsonpath.py": [
+   "Token",
+   "TokenType"
+  ],
+  "sqlglot/parsers/redshift.py": [
+   "TokenType"
+  ],
+  "sqlglot/parsers/clickhouse.py": [
+   "Token",
+   "TokenType"
+  ],
+  "sqlglot/parsers/trino.py": [
+   "TokenType"
+  ],
+  "sqlglot/parsers/dremio.py": [
+   "TokenType"
+  ],
+  "sqlglot/parsers/singlestore.py": [
+   "TokenType"
+  ],
+  "sqlglot/parsers/solr.py": [
+   "TokenType"
+  ],
+  "sqlglot/parsers/spark2.py": [
+   "TokenType"
+  ],
+  "sqlglot/parsers/risingwave.py": [
+   "TokenType"
+  ],
+  "sqlglot/parsers/bigquery.py": [
+   "TokenType"
+  ],
+  "sqlglot/parsers/sqlite.py": [
+   "Token",
+   "TokenType"
+  ],
+  "sqlglot/parsers/doris.py": [
+   "TokenType"
+  ],
+  "sqlglot/parsers/hive.py": [
+   "TokenType"
+  ],
+  "sqlglot/parsers/materialize.py": [
+   "TokenType"
+  ],
+  "sqlglot/parsers/tsql.py": [
+   "TokenType"
+  ],
+  "sqlglot/parsers/prql.py": [
+   "TokenType"
+  ],
+  "sqlglot/parsers/dax.py": [
+   "TokenType"
+  ],
+  "sqlglot/parsers/snowflake.py": [
+   "TokenType"
+  ],
+  "sqlglot/parsers/postgres.py": [
+   "TokenType"
+  ],
+  "sqlglot/parsers/drill.py": [
+   "TokenType"
+  ],
+  "sqlglot/parsers/presto.py": [
+   "TokenType"
+  ],
+  "sqlglot/parsers/spark.py": [
+   "TokenType"
+  ],
+  "sqlglot/parsers/databricks.py": [
+   "TokenType"
+  ],
+  "sqlglot/parsers/oracle.py": [
+   "TokenType"
+  ],
+  "sqlglot/parsers/exasol.py": [
+   "TokenType"
+  ],
+  "sqlglot/parsers/duckdb.py": [
+   "TokenType"
+  ],
+  "sqlglot/parsers/starrocks.py": [
+   "TokenType"
+  ],
+  "sqlglot/parsers/athena.py": [
+   "Token",
+   "TokenType"
+  ],
+  "sqlglot/parsers/teradata.py": [
+   "TokenType"
+  ],
+  "sqlglot/parsers/base.py": [
+   "TokenType"
+  ],
+  "sqlglot/parsers/mysql.py": [
+   "TokenType"
+  ],
+  "sqlglot/dialects/redshift.py": [
+   "TokenType"
+  ],
+  "sqlglot/dialects/clickhouse.py": [
+   "TokenType"
+  ],
+  "sqlglot/dialects/trino.py": [
+   "TokenType"
+  ],
+  "sqlglot/dialects/fabric.py": [
+   "TokenType"
+  ],
+  "sqlglot/dialects/singlestore.py": [
+   "TokenType"
+  ],
+  "sqlglot/dialects/dialect.py": [
+   "Token",
+   "TokenType"
+  ],
+  "sqlglot/dialects/spark2.py": [
+   "TokenType"
+  ],
+  "sqlglot/dialects/risingwave.py": [
+   "TokenType"
+  ],
+  "sqlglot/dialects/bigquery.py": [
+   "TokenType"
+  ],
+  "sqlglot/dialects/sqlite.py": [
+   "TokenType"
+  ],
+  "sqlglot/dialects/hive.py": [
+   "TokenType"
+  ],
+  "sqlglot/dialects/tsql.py": [
+   "TokenType"
+  ],
+  "sqlglot/dialects/prql.py": [
+   "TokenType"
+  ],
+  "sqlglot/dialects/snowflake.py": [
+   "TokenType"
+  ],
+  "sqlglot/dialects/postgres.py": [
+   "TokenType"
+  ],
+  "sqlglot/dialects/presto.py": [
+   "TokenType"
+  ],
+  "sqlglot/dialects/spark.py": [
+   "TokenType"
+  ],
+  "sqlglot/dialects/databricks.py": [
+   "TokenType"
+  ],
+  "sqlglot/dialects/oracle.py": [
+   "TokenType"
+  ],
+  "sqlglot/dialects/exasol.py": [
+   "TokenType"
+  ],
+  "sqlglot/dialects/duckdb.py": [
+   "TokenType"
+  ],
+  "sqlglot/dialects/starrocks.py": [
+   "TokenType"
+  ],
+  "sqlglot/dialects/athena.py": [
+   "Token",
+   "TokenType"
+  ],
+  "sqlglot/dialects/teradata.py": [
+   "TokenType"
+  ],
+  "sqlglot/dialects/mysql.py": [
+   "TokenType"
+  ],
+  "sqlglot/expressions/core.py": [
+   "Token"
+  ],
+  "sqlglot/generators/sqlite.py": [
+   "TokenType"
+  ],
+  "sqlglot/generators/snowflake.py": [
+   "TokenType"
+  ]
+ }
+}

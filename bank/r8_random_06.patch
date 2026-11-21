@@ -1,0 +1,12 @@
+diff --git a/sqlglot/generator.py b/sqlglot/generator.py
+--- a/sqlglot/generator.py
++++ b/sqlglot/generator.py
+@@ -1070,7 +1070,7 @@
+         if expression.args.get(arg_name):
+             self.unsupported(
+                 diagnostic
+-                or UNSUPPORTED_TEMPLATE.format(
++                and UNSUPPORTED_TEMPLATE.format(
+                     arg_name, expression.__class__.__name__, self.dialect.__class__.__name__
+                 )
+             )

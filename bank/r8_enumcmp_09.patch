@@ -1,0 +1,12 @@
+diff --git a/sqlglot/parser.py b/sqlglot/parser.py
+--- a/sqlglot/parser.py
++++ b/sqlglot/parser.py
+@@ -9054,7 +9054,7 @@
+         return this
+ 
+     def _parse_per(self, this: exp.Expr | None) -> exp.Expr | None:
+-        if self._next.token_type == TokenType.L_PAREN and self._match_text_seq("PER"):
++        if self._next.token_type is TokenType.L_PAREN and self._match_text_seq("PER"):
+             return self.expression(
+                 exp.Per(this=this, expressions=self._parse_wrapped_csv(self._parse_per_key))
+             )

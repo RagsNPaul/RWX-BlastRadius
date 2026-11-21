@@ -1,0 +1,12 @@
+diff --git a/sqlglot/optimizer/pushdown_projections.py b/sqlglot/optimizer/pushdown_projections.py
+--- a/sqlglot/optimizer/pushdown_projections.py
++++ b/sqlglot/optimizer/pushdown_projections.py
+@@ -299,7 +299,7 @@
+             ordinals = {id(s) for _, s in group_by_ordinals[scope]}
+             first_aggregate: DependencyNode | None = None
+             non_aggregates: list[DependencyNode] = []
+-            has_grouping_key = False
++            has_grouping_key = True
+ 
+             for selection, output_node in zip(query.selects, outputs):
+                 aggregate, has_column, has_srf = _projection_properties(selection, windows)

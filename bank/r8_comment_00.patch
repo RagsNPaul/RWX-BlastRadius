@@ -1,0 +1,11 @@
+diff --git a/sqlglot/generators/bigquery.py b/sqlglot/generators/bigquery.py
+--- a/sqlglot/generators/bigquery.py
++++ b/sqlglot/generators/bigquery.py
+@@ -627,6 +627,7 @@
+         "distinct",
+         "else",
+         "end",
++        # comment
+         "enum",
+         "escape",
+         "except",

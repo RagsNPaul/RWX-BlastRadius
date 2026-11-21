@@ -1,0 +1,12 @@
+diff --git a/sqlglot/parsers/tsql.py b/sqlglot/parsers/tsql.py
+--- a/sqlglot/parsers/tsql.py
++++ b/sqlglot/parsers/tsql.py
+@@ -743,7 +743,7 @@
+ 
+     def _parse_table_part(self, schema: bool = False) -> exp.Expr | None:
+         # Schema mode already skips function parsing; otherwise, '(' may start a bare table hint.
+-        if not schema and self._next.token_type == TokenType.L_PAREN:
++        if not schema and self._next.token_type is TokenType.L_PAREN:
+             index = self._index
+             self._advance(2)
+             is_hint = self._match_texts(self.BARE_TABLE_HINTS) and self._match(TokenType.R_PAREN)

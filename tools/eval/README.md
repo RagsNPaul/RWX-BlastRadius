@@ -1,18 +1,20 @@
-# Evaluation tools (paths are hard-coded to the machine they were built on; parametrise first)
+# Evaluation tools
 
-- gt.py + gtplug.py: TRUE failing tests for any patch. Copies sqlglot, applies the patch, runs the full
-  suite (`-n 2`, SKIP_INTEGRATION=0, --timeout=120) with a pytest plugin that records FAILED, ERROR,
-  SUBFAILED and collection errors (= every test in that file). Validated: reproduces sample answers
-  exactly for rszg, 986c, 2jrq, 66ks. About 80 s per patch on 2 cores.
-- mutate.py SEED N OUTDIR: N random one-line mutants (operators, booleans, numbers, string keys) on
-  lines tests run AND on import-time/class-level lines, across all of sqlglot.
-- ev.py SAMPLE_OUT BANK_OUT: simulated seconds + misses for samples and bank.
+Paths are flags. `make eval` runs ground truth, then the scorer.
 
-# Map additions (tools/)
-- conftest_inst.py: inline ProcessPool (calls initializer!) + records which sqlglot classes each test
-  instantiates (with MRO) → inst.json.
-- import_classes.py: classes instantiated while importing sqlglot (template parses) → import_classes.json.
-
-# bank/
-24 mutants (seed 7) + truth.json (true failing test numbers).
-Results: cofounder selector 2 misses (r7_06, r7_11); prototype/reference_selector.py (V=B) 0 misses.
+- `gt.py --sqlglot DIR --python PY --tests sample/tests.json --bank bank [patch ...]`
+  Copies `--sqlglot`, applies each patch with `git apply`, and runs pytest with
+  `-n auto`, `SKIP_INTEGRATION=0`, `--timeout=120`, `-p no:cacheprovider`, `-p gtplug`.
+  Writes `bank/<id>.json` next to the patch and skips a patch that already has one.
+  `gtplug.py` records FAILED, ERROR, SUBFAILED, and collection errors (every test in that file).
+  The check that this matches the labeled sample is the four commits rszg, 2jrq, 66ks, 986c,
+  run with the pinned image's Python (its SQLite, not the host's).
+- `mutate.py --sqlglot DIR --maps maps --kind KIND SEED N OUTDIR`
+  KIND is `random` (lines in `maps/lines` and `import_lines`), `classattr`, `enumcmp`,
+  `copyflag`, `deadbranch`, `fixture`, or `comment`. Ids are `r<seed>_<kind>_<nn>`
+  and an existing patch is never overwritten.
+- `ev.py --sqlglot DIR --python PY --tests sample/tests.json --bank bank --maps maps`
+  Reads `sample/answers.json`, every `bank/<id>.json`, and `bank/truth.json`.
+  Runs `selector/main.py` and prints, per set: commits, simulated seconds, seconds per
+  commit, misses, CPU seconds, and the ten commits with the largest (cost − best packing
+  of the true failures), with that commit's reason from the selector's stderr.

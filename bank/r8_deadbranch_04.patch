@@ -1,0 +1,12 @@
+diff --git a/sqlglot/generators/spark.py b/sqlglot/generators/spark.py
+--- a/sqlglot/generators/spark.py
++++ b/sqlglot/generators/spark.py
+@@ -200,7 +200,7 @@
+ 
+     def readparquet_sql(self, expression: exp.ReadParquet) -> str:
+         if len(expression.expressions) != 1:
+-            self.unsupported("READ_PARQUET with multiple arguments is not supported")
++            self.unsupported("READ_PARQUET with multiple arguments is supported")
+             return ""
+ 
+         parquet_file = expression.expressions[0]

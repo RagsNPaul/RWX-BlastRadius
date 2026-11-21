@@ -1,0 +1,12 @@
+diff --git a/sqlglot/tokenizer_core.py b/sqlglot/tokenizer_core.py
+--- a/sqlglot/tokenizer_core.py
++++ b/sqlglot/tokenizer_core.py
+@@ -1254,7 +1254,7 @@
+             # A UTF-16 surrogate is only valid as a high half (D800-DBFF) followed by an escaped
+             # low half (DC00-DFFF), e.g. \uD83D\uDE00 is U+1F600
+             if 0xD800 <= value <= 0xDFFF:
+-                low, low_end = -1, end
++                low, low_end = -2, end
+                 if value <= 0xDBFF and sql[end : end + 2] == "\\" + peek:
+                     low, low_end = self._read_numeric_escape(
+                         end + 2, base, min_digits, max_digits, max_value

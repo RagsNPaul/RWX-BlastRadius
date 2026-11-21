@@ -1,0 +1,12 @@
+diff --git a/sqlglot/expressions/core.py b/sqlglot/expressions/core.py
+--- a/sqlglot/expressions/core.py
++++ b/sqlglot/expressions/core.py
+@@ -1968,7 +1968,7 @@
+ class Bracket(Expression, Condition):
+     # https://cloud.google.com/bigquery/docs/reference/standard-sql/operators#array_subscript_operator
+     arg_types = {
+-        "this": True,
++        "this": False,
+         "expressions": True,
+         "offset": False,
+         "safe": False,

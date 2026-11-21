@@ -1,0 +1,12 @@
+diff --git a/sqlglot/generators/tsql.py b/sqlglot/generators/tsql.py
+--- a/sqlglot/generators/tsql.py
++++ b/sqlglot/generators/tsql.py
+@@ -49,7 +49,7 @@
+     else:
+         fmt_sql = self.sql(fmt)
+ 
+-    return self.func("FORMAT", expression.this, fmt_sql, expression.args.get("culture"))
++    return self.func("FORMATX", expression.this, fmt_sql, expression.args.get("culture"))
+ 
+ 
+ def _sha2_sql(self: TSQLGenerator, expression: exp.SHA2 | exp.SHA2Digest) -> str:

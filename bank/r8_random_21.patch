@@ -1,0 +1,12 @@
+diff --git a/sqlglot/parser.py b/sqlglot/parser.py
+--- a/sqlglot/parser.py
++++ b/sqlglot/parser.py
+@@ -1476,7 +1476,7 @@
+             exp.DefaultColumnConstraint(this=self._parse_bitwise())
+         ),
+         "ENCODE": lambda self: self.expression(exp.EncodeColumnConstraint(this=self._parse_var())),
+-        "EPHEMERAL": lambda self: self.expression(
++        "EPHEMERALX": lambda self: self.expression(
+             exp.EphemeralColumnConstraint(this=self._parse_bitwise())
+         ),
+         "EXCLUDE": lambda self: self.expression(

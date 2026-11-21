@@ -1,0 +1,12 @@
+diff --git a/sqlglot/dialects/drill.py b/sqlglot/dialects/drill.py
+--- a/sqlglot/dialects/drill.py
++++ b/sqlglot/dialects/drill.py
+@@ -45,7 +45,7 @@
+         "DD": "%j",
+         "D": "%-j",
+         "E": "%a",
+-        "EE": "%a",
++        "EEX": "%a",
+         "EEE": "%a",
+         "EEEE": "%A",
+         "''T''": "T",

@@ -1,0 +1,12 @@
+diff --git a/sqlglot/expressions/dml.py b/sqlglot/expressions/dml.py
+--- a/sqlglot/expressions/dml.py
++++ b/sqlglot/expressions/dml.py
+@@ -73,7 +73,7 @@
+         "with_": False,
+         "this": False,
+         "using": False,
+-        "where": False,
++        "where": True,
+         "returning": False,
+         "order": False,
+         "limit": False,

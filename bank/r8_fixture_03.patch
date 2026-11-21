@@ -1,0 +1,12 @@
+diff --git a/tests/fixtures/optimizer/annotate_functions.sql b/tests/fixtures/optimizer/annotate_functions.sql
+--- a/tests/fixtures/optimizer/annotate_functions.sql
++++ b/tests/fixtures/optimizer/annotate_functions.sql
+@@ -2722,7 +2722,7 @@
+ DECFLOAT;
+ 
+ # dialect: snowflake
+-CBRT(tbl.int_col);
++CBRT(tbl.int_colX);
+ DOUBLE;
+ 
+ # dialect: snowflake

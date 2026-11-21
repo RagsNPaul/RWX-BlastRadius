@@ -1,0 +1,12 @@
+diff --git a/sqlglot/expressions/query.py b/sqlglot/expressions/query.py
+--- a/sqlglot/expressions/query.py
++++ b/sqlglot/expressions/query.py
+@@ -2217,7 +2217,7 @@
+ 
+ 
+ class Block(Expression):
+-    arg_types = {"expressions": True, "begin": False}
++    arg_types = {"expressions": True, "begin": True}
+ 
+ 
+ class IfBlock(Expression):

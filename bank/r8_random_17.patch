@@ -1,0 +1,12 @@
+diff --git a/sqlglot/parsers/bigquery.py b/sqlglot/parsers/bigquery.py
+--- a/sqlglot/parsers/bigquery.py
++++ b/sqlglot/parsers/bigquery.py
+@@ -341,7 +341,7 @@
+         "JSON_ARRAY": lambda self: self.expression(
+             exp.JSONArray(expressions=self._parse_csv(self._parse_bitwise))
+         ),
+-        "MAKE_INTERVAL": lambda self: self._parse_make_interval(),
++        "MAKE_INTERVALX": lambda self: self._parse_make_interval(),
+         "PREDICT": lambda self: self._parse_ml(exp.Predict),
+         "TRANSLATE": lambda self: self._parse_translate(),
+         "FEATURES_AT_TIME": lambda self: self._parse_features_at_time(),

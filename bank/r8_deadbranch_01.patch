@@ -1,0 +1,12 @@
+diff --git a/sqlglot/generators/singlestore.py b/sqlglot/generators/singlestore.py
+--- a/sqlglot/generators/singlestore.py
++++ b/sqlglot/generators/singlestore.py
+@@ -1545,7 +1545,7 @@
+         if timezone:
+             if isinstance(timezone, exp.Literal) and timezone.name.lower() == "utc":
+                 return self.func("UTC_DATE")
+-            self.unsupported("CurrentDate with timezone is not supported in SingleStore")
++            self.unsupported("CurrentDate with timezone is supported in SingleStore")
+ 
+         return self.func("CURRENT_DATE")
+ 

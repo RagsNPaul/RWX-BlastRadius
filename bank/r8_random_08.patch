@@ -1,0 +1,12 @@
+diff --git a/sqlglot/parsers/bigquery.py b/sqlglot/parsers/bigquery.py
+--- a/sqlglot/parsers/bigquery.py
++++ b/sqlglot/parsers/bigquery.py
+@@ -637,7 +637,7 @@
+             if unnest_expr.is_type(exp.DType.ARRAY) and any(
+                 array_elem.is_type(exp.DType.STRUCT) for array_elem in unnest_expr._type.expressions
+             ):
+-                unnest.set("explode_array", True)
++                unnest.set("explode_array", False)
+ 
+         return unnest
+ 

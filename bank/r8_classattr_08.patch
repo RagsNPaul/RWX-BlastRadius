@@ -1,0 +1,12 @@
+diff --git a/sqlglot/parsers/dremio.py b/sqlglot/parsers/dremio.py
+--- a/sqlglot/parsers/dremio.py
++++ b/sqlglot/parsers/dremio.py
+@@ -107,7 +107,7 @@
+         "DATE_FORMAT": build_formatted_time(exp.TimeToStr),
+         "DATE_SUB": build_date_delta_with_cast_interval(exp.DateSub),
+         "REGEXP_MATCHES": exp.RegexpLike.from_arg_list,
+-        "REGEXP_SPLIT": lambda args: exp.RegexpSplit(
++        "REGEXP_SPLITX": lambda args: exp.RegexpSplit(
+             this=seq_get(args, 0),
+             expression=seq_get(args, 1),
+             mode=seq_get(args, 2),

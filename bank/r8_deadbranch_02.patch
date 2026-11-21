@@ -1,0 +1,12 @@
+diff --git a/sqlglot/generators/postgres.py b/sqlglot/generators/postgres.py
+--- a/sqlglot/generators/postgres.py
++++ b/sqlglot/generators/postgres.py
+@@ -581,7 +581,7 @@
+             if expression.expressions:
+                 values = self.expressions(expression, key="values", flat=True)
+                 return f"{self.expressions(expression, flat=True)}[{values}]"
+-            return "ARRAY"
++            return "ARRAYX"
+ 
+         if expression.is_type(exp.DType.ENUM):
+             return f"ENUM ({self.expressions(expression, flat=True)})"

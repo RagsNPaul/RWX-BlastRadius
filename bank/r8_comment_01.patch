@@ -1,0 +1,11 @@
+diff --git a/sqlglot/transforms.py b/sqlglot/transforms.py
+--- a/sqlglot/transforms.py
++++ b/sqlglot/transforms.py
+@@ -1057,6 +1057,7 @@
+ 
+ 
+ def eliminate_window_clause(expression: exp.Expr) -> exp.Expr:
++    # comment
+     """Eliminates the `WINDOW` query clause by inling each named window."""
+     windows: list[exp.Expr] | None = expression.args.get("windows")
+     if isinstance(expression, exp.Select) and windows is not None:

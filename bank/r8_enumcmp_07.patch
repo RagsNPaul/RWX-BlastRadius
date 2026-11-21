@@ -1,0 +1,12 @@
+diff --git a/sqlglot/parsers/duckdb.py b/sqlglot/parsers/duckdb.py
+--- a/sqlglot/parsers/duckdb.py
++++ b/sqlglot/parsers/duckdb.py
+@@ -139,7 +139,7 @@
+         TokenType.SESSION_USER: exp.SessionUser,
+     }
+ 
+-    BITWISE = {k: v for k, v in parser.Parser.BITWISE.items() if k != TokenType.CARET}
++    BITWISE = {k: v for k, v in parser.Parser.BITWISE.items() if k is not TokenType.CARET}
+ 
+     COLUMN_OPERATORS = {
+         k: v

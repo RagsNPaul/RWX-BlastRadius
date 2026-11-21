@@ -1,0 +1,12 @@
+diff --git a/sqlglot/parser.py b/sqlglot/parser.py
+--- a/sqlglot/parser.py
++++ b/sqlglot/parser.py
+@@ -8396,7 +8396,7 @@
+             self.raise_error("Expected }")
+ 
+         # https://duckdb.org/docs/sql/data_types/struct.html#creating-structs
+-        if bracket_kind == TokenType.L_BRACE:
++        if bracket_kind is TokenType.L_BRACE:
+             this = self.expression(
+                 exp.Struct(
+                     expressions=self._kv_to_prop_eq(expressions=expressions, parse_map=parse_map)

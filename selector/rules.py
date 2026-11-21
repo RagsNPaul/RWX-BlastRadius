@@ -5,14 +5,42 @@ tools/make_map.py built from one coverage run of its test suite. Nothing here kn
 or a kind of edit, ahead of time. Where the maps cannot answer, more tests are selected.
 """
 import ast
+import copy
+import io
 import json
 import os
+import re
+import tokenize
 
 from classify import classify
 from patch import apply
 
 _DEFINITIONS = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
 _FUNCTIONS = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)
+_WORD = re.compile(r"[A-Za-z_][A-Za-z0-9_]{1,}")
+
+
+def _narrow_class():
+    """Class bodies with an inst entry skip file_union. NARROW_CLASS=0 restores it."""
+    return os.environ.get("NARROW_CLASS", "1") == "1"
+
+
+def _equiv_enum():
+    """is/== swaps on a plain Enum attribute are not a change. EQUIV_ENUM=0 keeps them."""
+    return os.environ.get("EQUIV_ENUM", "1") == "1"
+
+
+def _equiv_dead():
+    """A change that stays inside a body no test runs is not a change. EQUIV_DEAD=0 keeps it."""
+    return os.environ.get("EQUIV_DEAD", "1") == "1"
+
+
+_ENUM_SWAP = {
+    (ast.Is, ast.Eq),
+    (ast.Eq, ast.Is),
+    (ast.IsNot, ast.NotEq),
+    (ast.NotEq, ast.IsNot),
+}
 
 
 class Maps:
@@ -28,7 +56,10 @@ class Maps:
         self.py_reads = index["py_reads"]  # source -> tests that read it as text
         self.testfile = index["testfile"]  # test file -> its tests
         self.everything = frozenset(range(len(index["durations"])))
-        self._sets = self._blind = self._tests = self._importers = None
+        self.import_classes = set()  # module:QualName created while importing sqlglot
+        self.inst = {}  # module:QualName -> tests that instantiated it or a subclass
+        self._sets = self._blind = self._tests = self._importers = self._words = self._enums = None
+        self._scalars = {}
         self._lines, self._imported, self._sources = {}, {}, {}
 
     def check(self, tests):
@@ -39,12 +70,58 @@ class Maps:
         for test in tests:
             if test["number"] not in files.get(test["file"], ()):
                 raise ValueError(f"test {test['number']} is not in {test['file']} in the maps")
+        self._load_classes(tests)
 
     def tests_of(self, index):
         if self._sets is None:
             with open(os.path.join(self.maps_dir, "sets.json")) as f:
                 self._sets = json.load(f)
         return self._sets[index]
+
+    def _load_classes(self, tests):
+        """Instantiation map. inst.json lists, per test, every sqlglot class in that object's MRO."""
+        by_id = {test["id"]: test["number"] for test in tests}
+        with open(os.path.join(self.maps_dir, "import_classes.json")) as f:
+            self.import_classes = set(json.load(f))
+        with open(os.path.join(self.maps_dir, "inst.json")) as f:
+            recorded = json.load(f)
+        inst = {}
+        for nodeid, names in recorded.items():
+            key = "::".join(nodeid.split("[", 1)[0].split("::")[:3])
+            number = by_id.get(key)
+            if number is None:
+                continue
+            for name in names:
+                inst.setdefault(name, set()).add(number)
+        self.inst = inst
+
+    def words_of(self, words):
+        """Tests whose source or an opened fixture contains any of these casefolded words."""
+        if self._words is None:
+            file = os.path.join(self.maps_dir, "words.json")
+            with open(file) as f:
+                self._words = json.load(f)
+        found = set()
+        for word in words:
+            found.update(self._words.get(word, ()))
+        return found
+
+    def _load_enums(self):
+        if self._enums is None:
+            with open(os.path.join(self.maps_dir, "enums.json")) as f:
+                recorded = json.load(f)
+            self._enums = {file: frozenset(names) for file, names in recorded["names"].items()}
+            self._scalars = {file: frozenset(names) for file, names in recorded.get("scalars", {}).items()}
+
+    def enum_names(self, path):
+        """Local names of Enum classes whose equality is still identity. Loaded once."""
+        self._load_enums()
+        return self._enums.get(path, frozenset())
+
+    def scalar_names(self, path):
+        """Local names of Token and TokenType. `== None` matches `is None` for these."""
+        self._load_enums()
+        return self._scalars.get(path, frozenset())
 
     def lines(self, path):
         """{"line": set index}: the tests that ran the statement a line belongs to."""
@@ -147,6 +224,51 @@ def _imported_names(path, text):
 
 
 # --- units: the statement a line belongs to -------------------------------------------------
+def _class_chain(tree, line):
+    """Qualname of the class body that contains `line`, when the line is not inside a function.
+
+    The same walk as prototype/reference_selector.py variant B: a class-level statement names
+    its class, and a line inside a method names nothing.
+    """
+    best = None
+
+    def walk(node, prefix):
+        nonlocal best
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.ClassDef) and child.lineno <= line <= child.end_lineno:
+                qualname = prefix + [child.name]
+                best = qualname
+                walk(child, qualname)
+            elif isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)) and child.lineno <= line <= child.end_lineno:
+                if best and len(best) == len(prefix):
+                    best = None
+                return
+
+    walk(tree, [])
+    return ".".join(best) if best else None
+
+
+def _in_function(tree, line):
+    """True when `line` sits inside a function or method, including one nested in a statement."""
+    stack = [tree]
+    while stack:
+        node = stack.pop()
+        for child in ast.iter_child_nodes(node):
+            if not hasattr(child, "lineno") or not child.lineno <= line <= child.end_lineno:
+                continue
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                return True
+            stack.append(child)
+    return False
+
+
+def _module_name(path):
+    module = path[:-3].replace("/", ".")
+    if module.endswith(".__init__"):
+        module = module[:-9]
+    return module
+
+
 def _start(node):
     return min([node.lineno] + [d.lineno for d in getattr(node, "decorator_list", ())])
 
@@ -252,17 +374,550 @@ def _changed(hunks, unit, line_count):
     return replaced
 
 
+def _string_literals(text):
+    """String values written on one diff line. A broken line contributes nothing rather than a guess."""
+    found = set()
+    try:
+        for token in tokenize.generate_tokens(io.StringIO(text).readline):
+            if token.type == tokenize.STRING:
+                try:
+                    value = ast.literal_eval(token.string)
+                except (SyntaxError, ValueError):
+                    continue
+                if isinstance(value, str) and value:
+                    found.add(value)
+            elif token.type == tokenize.FSTRING_MIDDLE and token.string:
+                found.add(token.string)
+    except (tokenize.TokenError, IndentationError, SyntaxError):
+        return set()
+    return found
+
+
+def _words_of(literals):
+    """Casefolded words inside changed string literals. A literal with none cannot be searched."""
+    words, searchable = set(), True
+    for literal in literals:
+        found = {match.group(0).casefold() for match in _WORD.finditer(literal)}
+        if not found:
+            searchable = False
+        words |= found
+    return words, searchable
+
+
+def _places(tree):
+    """One walk: lines inside any function, and class-body lines keyed by QualName.
+
+    A function wins over the class that contains it, including a function nested in a statement,
+    which is the order `_source` uses.
+    """
+    functions, classes = set(), {}
+
+    def walk(node, prefix, in_function):
+        for child in ast.iter_child_nodes(node):
+            if not hasattr(child, "lineno"):
+                continue
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                functions.update(range(child.lineno, child.end_lineno + 1))
+                walk(child, prefix, True)
+            elif isinstance(child, ast.ClassDef):
+                qualname = prefix + [child.name]
+                if not in_function:
+                    name = ".".join(qualname)
+                    for line in range(child.lineno, child.end_lineno + 1):
+                        classes[line] = name
+                walk(child, qualname, in_function)
+            else:
+                walk(child, prefix, in_function)
+
+    walk(tree, [], False)
+    return functions, classes
+
+
+def _class_edits(hunks, tree, path):
+    """{module:QualName: (changed words, searchable)} for class-body lines of this patch.
+
+    `searchable` is false when a changed literal has no word to look up, or the hunk touches
+    more than one class. Those classes keep file_union.
+    """
+    functions, classes = _places(tree)
+    module = _module_name(path)
+
+    def key_at(line):
+        if line in functions:
+            return None
+        name = classes.get(line)
+        return f"{module}:{name}" if name else None
+
+    pending = {}
+    for rows in hunks:
+        i = 0
+        while i < len(rows):
+            if rows[i][0] == " ":
+                i += 1
+                continue
+            start = i
+            while i < len(rows) and rows[i][0] != " ":
+                i += 1
+            block = rows[start:i]
+            removed = [(number, row) for kind, number, row in block if kind == "-"]
+            added = [row for kind, _, row in block if kind == "+"]
+            keys = {key for number, _ in removed if (key := key_at(number))}
+            if not removed:
+                inserted = block[0][1]
+                keys = {key for line in (inserted - 1, inserted) if line > 0 and (key := key_at(line))}
+            if len(keys) != 1:
+                for key in keys:
+                    pending[key] = None
+                continue
+            key = next(iter(keys))
+            if key in pending and pending[key] is None:
+                continue
+            slot = pending.setdefault(key, [set(), set()])
+            for _, row in removed:
+                slot[0] |= _string_literals(row)
+            for row in added:
+                slot[1] |= _string_literals(row)
+    edits = {}
+    for key, slot in pending.items():
+        if slot is None:
+            edits[key] = None
+            continue
+        words, searchable = _words_of(slot[0] ^ slot[1])
+        edits[key] = (words, searchable)
+    return edits
+
+
+def _line_map(hunks, line_count):
+    """Old line -> new line for context lines and one-for-one replacements."""
+    mapping, new_line, position = {}, 1, 1
+    for rows in hunks:
+        if not rows:
+            continue
+        first = rows[0][1]
+        while position < first:
+            mapping[position] = new_line
+            position += 1
+            new_line += 1
+        index = 0
+        while index < len(rows):
+            kind, number, _ = rows[index]
+            if kind == " ":
+                mapping[number] = new_line
+                new_line += 1
+                position = number + 1
+                index += 1
+                continue
+            start = index
+            while index < len(rows) and rows[index][0] != " ":
+                index += 1
+            block = rows[start:index]
+            removed = [num for kind, num, _ in block if kind == "-"]
+            added = [row for kind, _, row in block if kind == "+"]
+            if removed and len(removed) == len(added):
+                for num in removed:
+                    mapping[num] = new_line
+                    new_line += 1
+                    position = num + 1
+            else:
+                new_line += len(added)
+                if removed:
+                    position = removed[-1] + 1
+    while position <= line_count:
+        mapping[position] = new_line
+        position += 1
+        new_line += 1
+    return mapping
+
+
+def _enum_attribute(node, names):
+    return (
+        isinstance(node, ast.Attribute)
+        and isinstance(node.value, ast.Name)
+        and node.value.id in names
+        and isinstance(node.value.ctx, ast.Load)
+    )
+
+
+def _is_none(node):
+    return isinstance(node, ast.Constant) and node.value is None
+
+
+def _locally_bound(tree, line, name):
+    """True when the function around `line` binds `name`, so it is not the imported Enum."""
+    stack = [tree]
+    while stack:
+        node = stack.pop()
+        for child in ast.iter_child_nodes(node):
+            if not hasattr(child, "lineno") or not child.lineno <= line <= child.end_lineno:
+                continue
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                args = child.args
+                bound = {arg.arg for arg in args.posonlyargs + args.args + args.kwonlyargs}
+                if args.vararg:
+                    bound.add(args.vararg.arg)
+                if args.kwarg:
+                    bound.add(args.kwarg.arg)
+                for sub in ast.walk(child):
+                    if isinstance(sub, ast.Name) and isinstance(sub.ctx, ast.Store) and sub.id == name:
+                        bound.add(name)
+                        break
+                if name in bound:
+                    return True
+                stack.append(child)
+                break
+            stack.append(child)
+            break
+    return False
+
+
+def _canon_compare(node):
+    clone = copy.deepcopy(node)
+    for child in ast.walk(clone):
+        if not isinstance(child, ast.Compare):
+            continue
+        child.ops = [
+            ast.Eq() if isinstance(op, ast.Is) else ast.NotEq() if isinstance(op, ast.IsNot) else op
+            for op in child.ops
+        ]
+    return clone
+
+
+def _swapped_compares(old, new):
+    """Compares whose operator differs, walked in lockstep. Empty when the shape differs."""
+    found = []
+
+    def walk(left, right):
+        if isinstance(left, ast.cmpop) and isinstance(right, ast.cmpop):
+            return True  # Eq versus Is is the swap, not a different shape
+        if type(left) is not type(right):
+            return False
+        if isinstance(left, ast.Compare):
+            if len(left.ops) != len(right.ops) or len(left.comparators) != len(right.comparators):
+                return False
+            if any(type(a) is not type(b) for a, b in zip(left.ops, right.ops)):
+                found.append((left, right))
+        children, others = list(ast.iter_child_nodes(left)), list(ast.iter_child_nodes(right))
+        if len(children) != len(others):
+            return False
+        return all(walk(child, other) for child, other in zip(children, others))
+
+    if not walk(old, new):
+        return None
+    return found
+
+
+def _enclosing_function(tree, line):
+    found = None
+    stack = [tree]
+    while stack:
+        node = stack.pop()
+        for child in ast.iter_child_nodes(node):
+            if not hasattr(child, "lineno") or not child.lineno <= line <= child.end_lineno:
+                continue
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                found = child
+            stack.append(child)
+            break
+    return found
+
+
+def _function_nodes(fn):
+    """Statements in `fn`, not statements of a nested function or class."""
+    stack = list(fn.body)
+    while stack:
+        node = stack.pop()
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+            continue
+        yield node
+        stack.extend(ast.iter_child_nodes(node))
+
+
+def _optional_or_union(node):
+    if isinstance(node, ast.Name):
+        return node.id in {"Optional", "Union"}
+    return isinstance(node, ast.Attribute) and node.attr in {"Optional", "Union"}
+
+
+def _annotation_ok(node, scalars):
+    """True when the annotation is only str/int/bool/Token/TokenType, or None."""
+    if isinstance(node, ast.Constant):
+        return node.value is None
+    if isinstance(node, ast.Name):
+        return node.id in {"str", "int", "bool"} or node.id in scalars
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
+        return _annotation_ok(node.left, scalars) and _annotation_ok(node.right, scalars)
+    if isinstance(node, ast.Subscript) and _optional_or_union(node.value):
+        if isinstance(node.slice, ast.Tuple):
+            return all(_annotation_ok(elt, scalars) for elt in node.slice.elts)
+        return _annotation_ok(node.slice, scalars)
+    return False
+
+
+def _obvious_scalar(node, scalars):
+    """An assignment that can only produce str, int, bool, Token, TokenType, or None."""
+    if isinstance(node, ast.Constant):
+        return node.value is None or isinstance(node.value, (str, bool, int))
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
+        operand = node.operand
+        return isinstance(operand, ast.Constant) and isinstance(operand.value, int) and not isinstance(operand.value, bool)
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+        return True
+    if isinstance(node, (ast.Compare, ast.BoolOp)):
+        return True
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in {"str", "int", "bool", "len"}:
+        return True
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in scalars:
+        return True
+    return (
+        isinstance(node, ast.Attribute)
+        and isinstance(node.value, ast.Name)
+        and node.value.id in scalars
+        and isinstance(node.value.ctx, ast.Load)
+    )
+
+
+def _stored_names(target):
+    """Names a target stores, and whether it is a single plain name."""
+    if isinstance(target, ast.Name) and isinstance(target.ctx, ast.Store):
+        return {target.id}, True
+    return {node.id for node in ast.walk(target) if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store)}, False
+
+
+def _none_operand_ok(node, tree, line, scalars):
+    """The other side of `is None` is a name this function types as a scalar.
+
+    Anything else, including an attribute and an unannotated parameter, is left as a real change.
+    """
+    if not isinstance(node, ast.Name) or not isinstance(node.ctx, ast.Load):
+        return False
+    fn = _enclosing_function(tree, line)
+    if fn is None:
+        return False
+    name, annotations, values = node.id, [], []
+    for arg in fn.args.posonlyargs + fn.args.args + fn.args.kwonlyargs:
+        if arg.arg == name and arg.annotation is not None:
+            annotations.append(arg.annotation)
+    for stmt in _function_nodes(fn):
+        if isinstance(stmt, ast.AnnAssign):
+            stored, plain = _stored_names(stmt.target)
+            if name not in stored:
+                continue
+            if not plain:
+                return False
+            if stmt.annotation is not None:
+                annotations.append(stmt.annotation)
+            if stmt.value is not None:
+                values.append(stmt.value)
+        elif isinstance(stmt, ast.Assign):
+            hit = False
+            for target in stmt.targets:
+                stored, plain = _stored_names(target)
+                if name not in stored:
+                    continue
+                if not plain:
+                    return False
+                hit = True
+            if hit:
+                values.append(stmt.value)
+        elif isinstance(stmt, (ast.AugAssign, ast.For, ast.NamedExpr)):
+            stored, _ = _stored_names(stmt.target)
+            if name in stored:
+                return False
+    if any(not _annotation_ok(ann, scalars) for ann in annotations):
+        return False
+    if any(not _obvious_scalar(value, scalars) for value in values):
+        return False
+    return bool(annotations) or bool(values)
+
+
+def _enum_equivalent(old, new, names, tree, line, scalars):
+    """The statements differ only by is↔== or is not↔!= on a plain Enum, or on None.
+
+    None applies only when the other operand is a str, int, bool, Token, or TokenType in this
+    function. An enum that overrides equality is not in `names`.
+    """
+    if ast.dump(_canon_compare(old)) != ast.dump(_canon_compare(new)):
+        return False
+    swaps = _swapped_compares(old, new)
+    if not swaps:
+        return False
+    for left, right in swaps:
+        sides = [left.left, *left.comparators]
+        for index, (before, after) in enumerate(zip(left.ops, right.ops)):
+            if type(before) is type(after):
+                continue
+            if (type(before), type(after)) not in _ENUM_SWAP:
+                return False
+            pair = (sides[index], sides[index + 1])
+            if any(_is_none(side) for side in pair):
+                others = [side for side in pair if not _is_none(side)]
+                if len(others) != 1 or not _none_operand_ok(others[0], tree, line, scalars):
+                    return False
+                continue
+            attrs = [side for side in pair if _enum_attribute(side, names)]
+            if not attrs or any(_locally_bound(tree, line, side.value.id) for side in attrs):
+                return False
+    return True
+
+
+def _equivalent_lines(tree, new_tree, hunks, old_lines, changed, unit, names, scalars):
+    """Old lines of statements whose only change is a safe enum or None comparison swap."""
+    mapping, skip, seen = _line_map(hunks, len(old_lines)), set(), set()
+    for line in changed:
+        statement = unit(line)
+        if not statement:
+            continue
+        first, last, node = statement
+        if first in seen:
+            continue
+        seen.add(first)
+        new_line = mapping.get(line)
+        if new_line is None:
+            continue
+        new_statement = _unit(new_tree, new_line)
+        if not new_statement:
+            continue
+        if _enum_equivalent(node, new_statement[2], names, tree, line, scalars):
+            skip.update(range(first, last + 1))
+    return skip
+
+
+def _statement_span(statements):
+    if not statements:
+        return set()
+    start = min(stmt.lineno for stmt in statements)
+    end = max(stmt.end_lineno for stmt in statements)
+    return set(range(start, end + 1))
+
+
+def _line_span(node):
+    if node is None:
+        return set()
+    return set(range(node.lineno, node.end_lineno + 1))
+
+
+def _dead_bodies(tree, table, imported):
+    """Bodies of if/elif/else/except/loop whose lines no test runs, with their condition lines.
+
+    A body qualifies when none of its lines is in the line map or in import_lines. The condition
+    is the header: the test, the for/while header, or the except type. An else has no test; its
+    header is the else line, so an edit of that line is not a body edit.
+    """
+    found = []
+
+    def add(body, condition):
+        span = _statement_span(body)
+        if not span:
+            return
+        if any(str(line) in table or line in imported for line in span):
+            return
+        found.append((span, condition))
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.If):
+            add(node.body, set(range(node.lineno, node.body[0].lineno)) | _line_span(node.test))
+            if node.orelse and not (len(node.orelse) == 1 and isinstance(node.orelse[0], ast.If)):
+                add(node.orelse, {node.orelse[0].lineno - 1})
+        elif isinstance(node, (ast.For, ast.AsyncFor, ast.While)):
+            header = set(range(node.lineno, node.body[0].lineno))
+            header |= _line_span(node.iter) if isinstance(node, (ast.For, ast.AsyncFor)) else _line_span(node.test)
+            if isinstance(node, (ast.For, ast.AsyncFor)):
+                header |= _line_span(node.target)
+            add(node.body, header)
+            if node.orelse:
+                add(node.orelse, {node.orelse[0].lineno - 1})
+        elif isinstance(node, ast.ExceptHandler) and node.body:
+            header = set(range(node.lineno, node.body[0].lineno)) | _line_span(node.type)
+            add(node.body, header)
+        elif isinstance(node, ast.Try) and node.orelse:
+            add(node.orelse, {node.orelse[0].lineno - 1})
+    return found
+
+
+def _edited_old_lines(hunks):
+    """Old line numbers the patch removes, plus the line a pure insertion is placed before."""
+    lines = []
+    for rows in hunks:
+        index = 0
+        while index < len(rows):
+            if rows[index][0] == " ":
+                index += 1
+                continue
+            start = index
+            while index < len(rows) and rows[index][0] != " ":
+                index += 1
+            block = rows[start:index]
+            removed = [number for kind, number, _ in block if kind == "-"]
+            if removed:
+                lines.extend(removed)
+            else:
+                lines.append(block[0][1])
+    return lines
+
+
+_DEAD_BODIES = {}
+
+
+def _dead_edit(path, tree, hunks, table, imported):
+    """Every changed line is in a dead body, and the condition line is untouched."""
+    edited = _edited_old_lines(hunks)
+    if not edited:
+        return False
+    if any(str(line) in table or line in imported for line in edited):
+        return False  # a covered or import line is not a dead body
+    bodies = _DEAD_BODIES.get(path)
+    if bodies is None:
+        bodies = _dead_bodies(tree, table, imported)
+        _DEAD_BODIES[path] = bodies
+    if not bodies:
+        return False
+    for line in edited:
+        if not any(line in span and line not in condition and not (set(edited) & condition) for span, condition in bodies):
+            return False
+    return True
+
+
+def _where(path, first, last):
+    """`path:line` or `path:first-last`. No line number leaves just the path."""
+    if first is None or last is None:
+        return path
+    if first == last:
+        return f"{path}:{first}"
+    return f"{path}:{first}-{last}"
+
+
+def _note(blame, rule, where, tests):
+    """Record which rule and line added `tests`. Callers never read this back into the selection."""
+    if blame is None or not tests:
+        return
+    if not isinstance(tests, frozenset):
+        tests = set(tests)
+    if tests:
+        blame.append((rule, where, tests))
+
+
+def _span_wheres(path, spans):
+    if not spans:
+        return [path]
+    return [_where(path, first, last) for first, last in spans]
+
+
 # --- rules 1-6: sqlglot/**/*.py -------------------------------------------------------------
-def _source(path, hunks, maps):
+def _source(path, hunks, maps, blame=None):
     tests = set(maps.py_reads.get(path, ()))  # rule 7 also holds for a source that tests read as text
+    _note(blame, "py-read", path, tests)
     text, tree, dump = maps.source(path)
     try:
         # Parsed from bytes, as the import system does, so a broken encoding line is an error here too
-        same = ast.dump(ast.parse(apply(text, hunks).encode("utf-8"))) == dump
+        new_tree = ast.parse(apply(text, hunks).encode("utf-8"))
+        same = ast.dump(new_tree) == dump
     except (SyntaxError, ValueError, UnicodeError) as error:
+        _note(blame, f"all:{type(error).__name__}", path, maps.everything)
         return maps.everything, f"all:{type(error).__name__}"  # the module no longer imports
     if same:
         return tests, "noop"  # rule 1: only comments or layout changed
+    if _equiv_dead() and _dead_edit(path, tree, hunks, maps.lines(path), maps.imported(path)):
+        return tests, "equiv-dead"  # the body never runs; keep only tests that read the file as text
 
     units = {}
 
@@ -274,54 +929,154 @@ def _source(path, hunks, maps):
     old_lines = text.split("\n")
     table, imported = maps.lines(path), maps.imported(path)
     indexes, at_import, docstring = set(), False, False
-    for line, new in _changed(hunks, unit, len(old_lines)).items():  # rule 2
+    class_keys, import_ran, module_import = set(), False, False
+    doc_spans, class_spans, union_where, word_at = [], {}, [], {}
+    changed = _changed(hunks, unit, len(old_lines))
+    skip = set()
+    if _equiv_enum():
+        skip = _equivalent_lines(
+            tree, new_tree, hunks, old_lines, changed, unit, maps.enum_names(path), maps.scalar_names(path)
+        )
+    for line, new in changed.items():  # rule 2
+        if line in skip:
+            continue
         first, last, node = unit(line)
         if isinstance(node, _DEFINITIONS):
             last = node.end_lineno  # a def, class or decorator line: everything in its body
         elif isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant):
-            docstring = docstring or isinstance(node.value.value, str)
+            is_doc = isinstance(node.value.value, str)
+            docstring = docstring or is_doc
+            if blame is not None and is_doc:
+                doc_spans.append((first, last))
         inside = isinstance(node, ast.Lambda) and _within_lambda_body(node, line, old_lines[line - 1], new)
+        covered, span_import = False, False
         for number in range(first, last + 1):
             index = table.get(str(number))
             if index is not None:
                 indexes.add(index)  # rule 3: tests that ran the statement
-            if not inside and number in imported:
-                at_import = True  # rule 4: it also runs when the module is imported
+                covered = True
+            if number in imported:
+                span_import = True
+                if not inside:
+                    at_import = True  # rule 4: it also runs when the module is imported
+        if blame is not None and covered:
+            found = set()
+            for number in range(first, last + 1):
+                index = table.get(str(number))
+                if index is not None:
+                    found.update(maps.tests_of(index))
+            _note(blame, "line", _where(path, first, last), found)
+        if span_import and _in_function(tree, line):
+            import_ran = True  # a function that runs at import can break every importer
+            _note(blame, "all:import-line", _where(path, first, last), maps.everything)
+        elif span_import:
+            chain = _class_chain(tree, line)
+            if chain:
+                key = f"{_module_name(path)}:{chain}"
+                class_keys.add(key)
+                if blame is not None:
+                    class_spans.setdefault(key, []).append((first, last))
+            else:
+                module_import = True  # an assignment or other statement that is not inside a class
+                if blame is not None:
+                    union_where.append(_where(path, first, last))
+                if covered:
+                    import_ran = True  # module-level code that tests ran and that also runs at import
+                    _note(blame, "all:import-line", _where(path, first, last), maps.everything)
     for index in indexes:
         tests.update(maps.tests_of(index))
     reason = "line" if indexes else "uncovered"  # rule 5: a line that never ran selects nothing
-    if at_import:
+    edits, word_bag, narrowed = None, set(), False
+    # file_union stays for module-level import lines, for a class with no inst entry, and when
+    # a changed literal is not a word. A class created at import still selects every test.
+    need_union = module_import
+    for key in class_keys:
+        if key in maps.import_classes:
+            for other in class_keys:
+                if other in maps.import_classes:
+                    for where in _span_wheres(path, class_spans.get(other)):
+                        _note(blame, "all:import-class", where, maps.everything)
+            return maps.everything, "all:import-class"
+        inst_tests = maps.inst.get(key)
+        info = None
+        if _narrow_class() and inst_tests:
+            if edits is None:
+                edits = _class_edits(hunks, tree, path)
+            info = edits.get(key)
+        wheres = _span_wheres(path, class_spans.get(key))
+        if info is not None and info[1]:
+            tests.update(inst_tests)
+            word_bag |= info[0]
+            narrowed = True
+            for where in wheres:
+                _note(blame, "class", where, inst_tests)
+                if blame is not None and info[0]:
+                    word_at.setdefault(where, set()).update(info[0])
+        else:
+            need_union = True
+            tests.update(inst_tests or ())
+            for where in wheres:
+                _note(blame, "class", where, inst_tests or ())
+                if blame is not None:
+                    union_where.append(where)
+    if import_ran:
+        return maps.everything, "all:import-line"
+    if at_import and need_union:
         if path not in maps.file_union:
+            _note(blame, "all:import-unmapped", path, maps.everything)
             return maps.everything, "all:import-unmapped"  # imported, yet no test is known to use it
         tests.update(maps.file_union[path])
         tests.update(maps.blind())
+        for where in union_where or [path]:
+            _note(blame, "import->file", where, maps.file_union[path])
+            _note(blame, "blind", where, maps.blind())
         reason = "import->file"
+        if class_keys:
+            reason += "+class"
+    elif narrowed:
+        reason = "line+class" if indexes else "class"
+    if word_bag:
+        tests.update(maps.words_of(word_bag))
+        if blame is not None:
+            for where, words in word_at.items():
+                _note(blame, "word", where, maps.words_of(words))
+        reason += "+word"
     if docstring:
-        tests.update(maps.doctests())  # rule 6
+        doc = maps.doctests()
+        tests.update(doc)
+        for where in _span_wheres(path, doc_spans):
+            _note(blame, "docstring", where, doc)
         reason += "+docstring"
+    if skip and changed and all(line in skip for line in changed) and reason == "uncovered":
+        reason = "equiv-enum"
     return tests, reason
 
 
-def _new_source(file, files, maps):
+def _new_source(file, files, maps, blame=None):
     """A new module under sqlglot/: nothing at the pinned commit imports it, so it only matters
     when the same patch starts to use it, or when a test reads every module of its folder."""
     name = os.path.basename(file.new)[:-3]
     if name == "__init__" or os.path.exists(os.path.join(maps.source_dir, file.new)):
+        _note(blame, "all:new-package", file.new, maps.everything)
         return maps.everything, "all:new-package"
     for other in files:
         if other is not file and any(kind == "+" and name in row for rows in other.hunks for kind, _, row in rows):
+            _note(blame, "all:new-imported", file.new, maps.everything)
             return maps.everything, "all:new-imported"
     folder, tests = os.path.dirname(file.new), set()
     for path, numbers in maps.py_reads.items():
         if os.path.dirname(path) == folder:
             tests.update(numbers)
+            _note(blame, "new", path, numbers)
     return tests, "new"
 
 
 # --- rule 7: fixtures and other data files --------------------------------------------------
-def _data(path, maps):
+def _data(path, maps, blame=None):
     if path in maps.opens:
-        return set(maps.opens[path])
+        tests = set(maps.opens[path])
+        _note(blame, "data", path, tests)
+        return tests
     # No test opened it by name (a new file, or one found by listing a folder): take the tests
     # that opened its nearest neighbours.
     folder = os.path.dirname(path)
@@ -331,44 +1086,59 @@ def _data(path, maps):
             if other.startswith(folder + "/"):
                 tests.update(numbers)
         if tests:
+            _note(blame, "data", folder + "/", tests)
             return tests
         folder = os.path.dirname(folder)
+    _note(blame, "all:data", path, maps.everything)
     return maps.everything
 
 
 # --- rule 8: tests/**/*.py ------------------------------------------------------------------
-def _test(path, maps):
+def _test(path, maps, blame=None):
     if path not in maps.testfile:
+        _note(blame, "all:test-support", path, maps.everything)
         return maps.everything, "all:test-support"  # helpers, conftest, __init__: any test may use it
-    tests = set()
+    tests, parts = set(), []
     for file in maps.importers(path):
         if file not in maps.testfile:
+            _note(blame, "all:test-support", file, maps.everything)
             return maps.everything, "all:test-support"
-        tests.update(maps.testfile[file])
+        numbers = maps.testfile[file]
+        tests.update(numbers)
+        parts.append((file, numbers))
+    for file, numbers in parts:
+        _note(blame, "testfile", file, numbers)
     return tests, "testfile"
 
 
-def _file(file, files, maps):
+def _file(file, files, maps, blame=None):
     paths = {path for path in (file.old, file.new) if path}
     kinds = {classify(path, maps.opens) for path in paths}
     if kinds == {"data"}:  # changed, added, deleted or renamed: every name it had or gets
-        return set().union(*(_data(path, maps) for path in paths)), "data"
+        return set().union(*(_data(path, maps, blame) for path in paths)), "data"
     if file.old is None and kinds == {"source"}:
-        return _new_source(file, files, maps)
+        return _new_source(file, files, maps, blame)
     if file.old != file.new or file.binary or not file.hunks:
-        return maps.everything, "all:" + ("added-deleted-renamed" if file.old != file.new else "no-text-change")
+        reason = "all:" + ("added-deleted-renamed" if file.old != file.new else "no-text-change")
+        _note(blame, reason, file.old or file.new, maps.everything)
+        return maps.everything, reason
     if kinds == {"source"}:
-        return _source(file.old, file.hunks, maps)
+        return _source(file.old, file.hunks, maps, blame)
     if kinds == {"test"}:
-        return _test(file.old, maps)
+        return _test(file.old, maps, blame)
+    _note(blame, "all:other", file.old or file.new, maps.everything)
     return maps.everything, "all:other"  # rule 9
 
 
-def select(files, maps):
-    """-> (test numbers, [reason per file]): the union over the files of one patch."""
+def select(files, maps, blame=None):
+    """-> (test numbers, [reason per file]): the union over the files of one patch.
+
+    `blame`, when a list, receives (rule, line-range, tests) for each addition. It is not
+    consulted. main.py leaves it empty, so a scored run records nothing.
+    """
     selected, reasons = set(), []
     for file in files:
-        tests, reason = _file(file, files, maps)
+        tests, reason = _file(file, files, maps, blame)
         selected.update(tests)
         reasons.append(reason)
         if len(selected) == len(maps.everything):

@@ -1,0 +1,12 @@
+diff --git a/sqlglot/generators/duckdb.py b/sqlglot/generators/duckdb.py
+--- a/sqlglot/generators/duckdb.py
++++ b/sqlglot/generators/duckdb.py
+@@ -4417,7 +4417,7 @@
+ 
+         # Strip default group when no following params (DuckDB default is same as group=0)
+         if (
+-            not validated_flags
++            validated_flags
+             and group
+             and group.name == str(self.dialect.REGEXP_EXTRACT_DEFAULT_GROUP)
+         ):

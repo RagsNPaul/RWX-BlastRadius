@@ -1,0 +1,12 @@
+diff --git a/sqlglot/generator.py b/sqlglot/generator.py
+--- a/sqlglot/generator.py
++++ b/sqlglot/generator.py
+@@ -3534,7 +3534,7 @@
+             # "FETCH FIRST ROWS ONLY" without a count means one row per the SQL
+             # standard; emitting a bare "LIMIT" here would produce invalid SQL.
+             limit = exp.Limit(
+-                expression=exp.maybe_copy(count) if count is not None else exp.Literal.number(1)
++                expression=exp.maybe_copy(count) if count != None else exp.Literal.number(1)
+             )
+         elif (
+             self.LIMIT_FETCH == "FETCH" and isinstance(limit, exp.Limit) and not limit.is_limit_all
