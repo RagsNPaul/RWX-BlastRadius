@@ -28,9 +28,13 @@ BROAD_FILES = (
     "tests/test_serde.py",
     "tests/test_expressions.py",
 )
-# file_tests larger than this are treated as "imported by everyone" and ignored
-# for expansion (e.g. dialects/dialect.py).
-FILETESTS_CAP = 80
+# Skip only mega-hub modules (dialect.py is imported by nearly every test).
+FILETESTS_CAP = 400
+HUB_FILES = {
+    "sqlglot/dialects/dialect.py",
+    "sqlglot/helper.py",
+    "sqlglot/expressions/__init__.py",
+}
 
 
 def load_map() -> tuple[dict, dict, dict]:
@@ -211,6 +215,8 @@ def tests_in_files(tests: list[dict], files: tuple[str, ...] | list[str]) -> set
 
 
 def safe_filetests(filetests: dict, path: str) -> set[int]:
+    if path in HUB_FILES:
+        return set()
     hits = set(filetests.get(path, ()))
     if len(hits) > FILETESTS_CAP:
         return set()
@@ -267,6 +273,117 @@ def and_or_flip(old_src: str, new_src: str) -> bool:
         )
 
     return boolops(old_t) != boolops(new_t)
+
+
+def compare_ops(tree: ast.AST) -> list[str]:
+    out: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Compare):
+            out.append("|".join(type(op).__name__ for op in node.ops))
+        elif isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+            out.append("Not")
+    return sorted(out)
+
+
+def predicate_flip(old_src: str, new_src: str) -> bool:
+    """And/Or, comparison operator, or not-flip — coverage under-approximates these."""
+    if and_or_flip(old_src, new_src):
+        return True
+    try:
+        old_t, new_t = ast.parse(old_src), ast.parse(new_src)
+    except SyntaxError:
+        return True
+    return compare_ops(old_t) != compare_ops(new_t)
+
+
+def only_identity_compare_flip(old_src: str, new_src: str) -> bool:
+    """True when the only compare change is Is/IsNot ↔ Eq/NotEq (often `is None`)."""
+    if and_or_flip(old_src, new_src):
+        return False
+    try:
+        old_t, new_t = ast.parse(old_src), ast.parse(new_src)
+    except SyntaxError:
+        return False
+    from collections import Counter
+
+    old_ops, new_ops = Counter(compare_ops(old_t)), Counter(compare_ops(new_t))
+    if old_ops == new_ops:
+        return False
+    identity = {"Is", "IsNot", "Eq", "NotEq"}
+    # Diff the multisets; every touched signature must be identity-class.
+    touched = set()
+    for key in set(old_ops) | set(new_ops):
+        if old_ops[key] != new_ops[key]:
+            for part in key.split("|"):
+                if part != "Not":
+                    touched.add(part)
+    # Must involve Is/IsNot (e.g. `is None`↔`== None`), not plain ==↔!=.
+    return bool(touched) and touched.issubset(identity) and bool(
+        touched & {"Is", "IsNot"}
+    )
+
+
+def constants_changed(old_src: str, new_src: str) -> bool:
+    """True/False/number/string literal edits (including nested class tables)."""
+    try:
+        old_t, new_t = ast.parse(old_src), ast.parse(new_src)
+    except SyntaxError:
+        return True
+
+    def consts(tree: ast.AST) -> list[str]:
+        out: list[str] = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Constant):
+                out.append(repr(node.value))
+        return sorted(out)
+
+    return consts(old_t) != consts(new_t)
+
+
+def broaden_for_path(path: str, tests: list[dict], filetests: dict) -> set[int]:
+    """Conservative expansion when coverage is a poor proxy for failure."""
+    selected = safe_filetests(filetests, path)
+    if path.startswith("sqlglot/serde") or path.startswith("sqlglot/optimizer/"):
+        selected |= tests_in_files(tests, BROAD_FILES)
+    elif path.startswith("sqlglot/executor/"):
+        selected |= tests_in_files(
+            tests, ("tests/test_executor.py", "tests/test_optimizer.py")
+        )
+    elif path.startswith("sqlglot/typing/"):
+        selected |= safe_filetests(filetests, path)
+        selected |= tests_in_file(tests, "tests/test_optimizer.py")
+    elif path.startswith("sqlglot/expressions/"):
+        selected |= tests_in_files(
+            tests,
+            ("tests/test_expressions.py", "tests/test_optimizer.py", "tests/test_serde.py"),
+        )
+    elif path in {
+        "sqlglot/tokens.py",
+        "sqlglot/parser.py",
+        "sqlglot/generator.py",
+        "sqlglot/errors.py",
+    } or path.startswith("sqlglot/tokens/") or path.startswith("sqlglot/parser") or path.startswith(
+        "sqlglot/generator"
+    ):
+        # Core parse/generate surfaces: cheap miss insurance.
+        selected |= tests_in_files(tests, BROAD_FILES)
+        dtype = dialect_test_file(path)
+        if dtype:
+            selected |= tests_in_file(tests, dtype)
+    else:
+        # dialects / parsers / generators modules
+        selected |= tests_in_files(
+            tests,
+            (
+                "tests/test_optimizer.py",
+                "tests/test_serde.py",
+                "tests/test_expressions.py",
+            ),
+        )
+        dtype = dialect_test_file(path)
+        if dtype:
+            selected |= tests_in_file(tests, dtype)
+    return selected
 
 
 def dialect_test_file(path: str) -> str | None:
@@ -374,58 +491,107 @@ def select_for_file(
     if uncovered:
         selected |= safe_filetests(filetests, path)
 
+    dtype = dialect_test_file(path)
+    is_and_or = and_or_flip(old, new)
+    is_pred = predicate_flip(old, new)
+    is_const = constants_changed(old, new)
+
     # Top-level dialect class attributes (WEEK_OFFSET, etc.): import-time, cross-cutting.
     top_names = top_level_class_direct_assign_names(old_tree, class_level_lines)
     top_names |= top_level_class_direct_assign_names(new_tree, class_level_lines)
     if top_names and path.startswith("sqlglot/dialects/"):
         selected |= safe_filetests(filetests, path)
-        dtype = dialect_test_file(path)
         if dtype:
             selected |= tests_in_file(tests, dtype)
         for name in top_names:
             selected |= attr_readers.get(name, set())
-        # Fallback if the attr was never seen under coverage.
         if not any(attr_readers.get(name) for name in top_names):
             selected |= tests_in_file(tests, "tests/test_optimizer.py")
 
-    # and/or flips change which branch runs; coverage under-approximates badly.
-    if and_or_flip(old, new):
-        selected |= safe_filetests(filetests, path)
-        if path.startswith("sqlglot/serde") or path.startswith("sqlglot/optimizer/"):
-            selected |= tests_in_files(tests, BROAD_FILES)
-        elif path.startswith("sqlglot/typing/"):
-            # Typing tables are narrowly covered; file_tests is enough.
-            selected |= safe_filetests(filetests, path)
-        else:
-            # parsers / generators / dialects: broaden, but skip heavy executor pools.
-            selected |= tests_in_files(
-                tests,
-                (
-                    "tests/test_optimizer.py",
-                    "tests/test_serde.py",
-                    "tests/test_expressions.py",
-                ),
-            )
-
-    if path.startswith("sqlglot/typing/"):
-        selected |= safe_filetests(filetests, path)
-
-    dtype = dialect_test_file(path)
-    if dtype and selected:
-        selected |= tests_in_file(tests, dtype)
-
-    # Real AST change with no mapped tests: keep a small safety net.
-    if not selected:
+    # Nested class / module-level tables: coverage often attributes to the wrong test.
+    if class_level_lines and not top_names:
         selected |= safe_filetests(filetests, path)
         if dtype:
             selected |= tests_in_file(tests, dtype)
-        if not selected and path.startswith("sqlglot/expressions/"):
+        if path.startswith("sqlglot/expressions/"):
             selected |= tests_in_file(tests, "tests/test_expressions.py")
-        if not selected and (
-            path.startswith("sqlglot/optimizer/")
-            or path.startswith("sqlglot/serde")
-            or path.startswith("sqlglot/typing/")
+        if path.startswith(("sqlglot/optimizer/", "sqlglot/serde", "sqlglot/executor/")):
+            selected |= broaden_for_path(path, tests, filetests)
+
+    # and/or flips: strongest under-approx — use full path broaden.
+    if is_and_or:
+        selected |= broaden_for_path(path, tests, filetests)
+
+    # ==/!=, </<=, is/==, not: broaden; `is None`↔`== None` stays closer to coverage.
+    elif is_pred:
+        selected |= safe_filetests(filetests, path)
+        if dtype:
+            selected |= tests_in_file(tests, dtype)
+        identity_only = only_identity_compare_flip(old, new)
+        if path.startswith(("sqlglot/optimizer/", "sqlglot/serde")):
+            selected |= broaden_for_path(path, tests, filetests)
+        elif path.startswith("sqlglot/executor/"):
+            selected |= tests_in_file(tests, "tests/test_executor.py")
+            if not identity_only:
+                selected |= tests_in_file(tests, "tests/test_optimizer.py")
+        elif identity_only:
+            pass  # line coverage + dialect/file_tests is enough for is/== None
+        elif path.startswith("sqlglot/expressions/"):
+            selected |= tests_in_files(
+                tests,
+                ("tests/test_expressions.py", "tests/test_optimizer.py", "tests/test_serde.py"),
+            )
+        elif path.startswith("sqlglot/typing/"):
+            selected |= tests_in_file(tests, "tests/test_optimizer.py")
+        else:
+            # dialect/parser/generator relational flips can break optimize paths.
+            selected |= tests_in_file(tests, "tests/test_optimizer.py")
+            selected |= tests_in_file(tests, "tests/test_expressions.py")
+
+    # Literal edits inside functions.
+    if is_const and not class_level_lines:
+        selected |= safe_filetests(filetests, path)
+        if dtype:
+            selected |= tests_in_file(tests, dtype)
+        if path.startswith("sqlglot/optimizer/"):
+            selected |= tests_in_file(tests, "tests/test_optimizer.py")
+        elif path.startswith(
+            ("sqlglot/serde", "sqlglot/executor/", "sqlglot/expressions/")
         ):
+            selected |= broaden_for_path(path, tests, filetests)
+
+    # ProcessPool / serialize: and/or and non-identity predicate flips under-count.
+    if path.startswith("sqlglot/optimizer/"):
+        selected |= tests_in_file(tests, "tests/test_optimizer.py")
+        need_executor = is_and_or or (
+            is_pred and not only_identity_compare_flip(old, new)
+        ) or uncovered
+        if need_executor:
+            selected |= tests_in_file(tests, "tests/test_executor.py")
+    if path.startswith("sqlglot/serde"):
+        selected |= tests_in_files(tests, BROAD_FILES)
+    if path.startswith("sqlglot/executor/"):
+        selected |= tests_in_file(tests, "tests/test_executor.py")
+    if path.startswith("sqlglot/typing/"):
+        selected |= safe_filetests(filetests, path)
+        selected |= tests_in_file(tests, "tests/test_optimizer.py")
+    if path.startswith("sqlglot/expressions/"):
+        selected |= tests_in_files(
+            tests,
+            ("tests/test_expressions.py", "tests/test_optimizer.py", "tests/test_serde.py"),
+        )
+
+    if dtype and selected:
+        selected |= tests_in_file(tests, dtype)
+
+    # Hub modules are imported everywhere; line maps are misleading.
+    if path in HUB_FILES:
+        selected |= tests_in_files(tests, BROAD_FILES)
+
+    # Real AST change with no mapped tests: miss costs 300s — prefer over-select.
+    if not selected:
+        selected |= broaden_for_path(path, tests, filetests)
+        if not selected:
             selected |= tests_in_files(tests, BROAD_FILES)
 
     return selected
