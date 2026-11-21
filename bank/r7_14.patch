@@ -1,0 +1,12 @@
+diff --git a/sqlglot/dialects/clickhouse.py b/sqlglot/dialects/clickhouse.py
+--- a/sqlglot/dialects/clickhouse.py
++++ b/sqlglot/dialects/clickhouse.py
+@@ -100,7 +100,7 @@
+             ".^": TokenType.DOTCARET,
+             "ATTACH": TokenType.COMMAND,
+             "DATE32": TokenType.DATE32,
+-            "DETACH": TokenType.DETACH,
++            "DETACHX": TokenType.DETACH,
+             "DATETIME64": TokenType.DATETIME64,
+             "DICTIONARY": TokenType.DICTIONARY,
+             "DYNAMIC": TokenType.DYNAMIC,

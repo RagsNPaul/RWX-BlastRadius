@@ -1,0 +1,13 @@
+diff --git a/tests/fixtures/optimizer/tpc-ds/tpc-ds.sql b/tests/fixtures/optimizer/tpc-ds/tpc-ds.sql
+index 1111111..2222222 100644
+--- a/tests/fixtures/optimizer/tpc-ds/tpc-ds.sql
++++ b/tests/fixtures/optimizer/tpc-ds/tpc-ds.sql
+@@ -11914,7 +11914,7 @@
+                    AND ca_state IN ( 'FL', 'WI', 'KS' )
+                    AND ws_net_profit BETWEEN 50 AND 250 ) )
+ GROUP  BY r_reason_desc
+-ORDER  BY SUBSTRING(r_reason_desc, 1, 20),
++ORDE1  BY SUBSTRING(r_reason_desc, 1, 20),
+           Avg(ws_quantity),
+           Avg(wr_refunded_cash),
+           Avg(wr_fee)

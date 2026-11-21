@@ -1,0 +1,13 @@
+diff --git a/sqlglot/parser.py b/sqlglot/parser.py
+index 1111111..2222222 100644
+--- a/sqlglot/parser.py
++++ b/sqlglot/parser.py
+@@ -6006,7 +6006,7 @@
+             if top:
+                 limit_paren = self._match(TokenType.L_PAREN)
+                 expression = (
+-                    self._parse_term() or self._parse_select()
++                    self._parse_term() and self._parse_select()
+                     if limit_paren
+                     else self._parse_number()
+                 )

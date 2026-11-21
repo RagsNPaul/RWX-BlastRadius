@@ -1,7 +1,12 @@
 import json,sys,re,ast,pickle,glob,os
 SQ='sqlglot'; DATA=sys.argv[1]
 T=json.load(open(f'{DATA}/tests.json'))['tests']; ms=[round(t['seconds']*1000) for t in T]
-lines,imp,filetests=pickle.load(open('maps/map.pkl','rb'))
+# maps/ written by tools/make_map.py, rebuilt into the old (lines, imp, filetests) triple
+IDX=json.load(open('maps/index.json')); SETS=[frozenset(s) for s in json.load(open('maps/sets.json'))]
+lines={os.path.relpath(p,'maps/lines')[:-5]:{int(k):SETS[v] for k,v in json.load(open(p)).items()}
+       for p in glob.glob('maps/lines/**/*.json',recursive=True)}
+imp={f:set(v) for f,v in IDX['import_lines'].items()}
+filetests={f:set(v) for f,v in IDX['file_union'].items()}
 # fixture -> tests: test functions whose source mentions the fixture stem
 fix={}
 num={t['id']:t['number'] for t in T}

@@ -1,0 +1,13 @@
+diff --git a/sqlglot/generators/duckdb.py b/sqlglot/generators/duckdb.py
+index 1111111..2222222 100644
+--- a/sqlglot/generators/duckdb.py
++++ b/sqlglot/generators/duckdb.py
+@@ -2691,7 +2691,7 @@
+         """
+         value = expression.this
+         format_arg = expression.args.get("format")
+-        is_safe = expression.args.get("safe")
++        is_safe = expression.args.get("Safe")
+         is_binary = _is_binary(expression)
+ 
+         if not format_arg and not is_binary:

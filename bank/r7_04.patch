@@ -1,0 +1,12 @@
+diff --git a/sqlglot/parser.py b/sqlglot/parser.py
+--- a/sqlglot/parser.py
++++ b/sqlglot/parser.py
+@@ -7926,7 +7926,7 @@
+         constraints: list[exp.Expr] = []
+ 
+         if (not kind and self._match(TokenType.ALIAS)) or self._match_texts(
+-            ("ALIAS", "MATERIALIZED")
++            ("ALIASX", "MATERIALIZED")
+         ):
+             # Match storage before _parse_types so STORED is not treated as a data type
+             # (needed for typeless columns, e.g. SQLite `b AS (a * 2) STORED`).

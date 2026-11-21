@@ -1,0 +1,12 @@
+diff --git a/sqlglot/expressions/temporal.py b/sqlglot/expressions/temporal.py
+--- a/sqlglot/expressions/temporal.py
++++ b/sqlglot/expressions/temporal.py
+@@ -291,7 +291,7 @@
+ 
+ 
+ class YearOfWeekIso(Expression, Func):
+-    _sql_names = ["YEAR_OF_WEEK_ISO", "YEAROFWEEKISO"]
++    _sql_names = ["YEAR_OF_WEEK_ISOX", "YEAROFWEEKISO"]
+ 
+ 
+ # Date/time construction

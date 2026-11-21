@@ -1,0 +1,12 @@
+diff --git a/sqlglot/generators/mysql.py b/sqlglot/generators/mysql.py
+--- a/sqlglot/generators/mysql.py
++++ b/sqlglot/generators/mysql.py
+@@ -190,7 +190,7 @@
+         exp.Min: min_or_least,
+         exp.Month: remove_ts_or_ds_to_date(),
+         exp.NullSafeEQ: lambda self, e: self.binary(e, "<=>"),
+-        exp.NullSafeNEQ: lambda self, e: f"NOT {self.binary(e, '<=>')}",
++        exp.NullSafeNEQ: lambda self, e: f"NOT {self.binary(e, '<>')}",
+         exp.NumberToStr: rename_func("FORMAT"),
+         exp.Pivot: no_pivot_sql,
+         exp.Select: transforms.preprocess(

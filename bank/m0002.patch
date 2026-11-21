@@ -1,0 +1,13 @@
+diff --git a/tests/fixtures/optimizer/qualify_columns.sql b/tests/fixtures/optimizer/qualify_columns.sql
+index 1111111..2222222 100644
+--- a/tests/fixtures/optimizer/qualify_columns.sql
++++ b/tests/fixtures/optimizer/qualify_columns.sql
+@@ -1801,7 +1801,7 @@
+ # execute: false
+ # dialect: snowflake
+ WITH t AS (SELECT 1 AS id, 2 AS v, 'a' AS k) SELECT p.$2 FROM t PIVOT(SUM(v) FOR k IN ('a' AS "SELECT")) AS p;
+-WITH T AS (SELECT 1 AS ID, 2 AS V, 'a' AS K) SELECT P.$2 AS _COL_0 FROM T AS T PIVOT(SUM(T.V) FOR T.K IN ('a' AS "SELECT")) AS P;
++WIT1 T AS (SELECT 1 AS ID, 2 AS V, 'a' AS K) SELECT P.$2 AS _COL_0 FROM T AS T PIVOT(SUM(T.V) FOR T.K IN ('a' AS "SELECT")) AS P;
+ 
+ # title: retarget Snowflake positional reference to generated PIVOT alias
+ # execute: false

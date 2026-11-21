@@ -1,0 +1,12 @@
+.git
+/.venv
+/sqlglot
+/sample
+/bank
+/prototype
+**/__pycache__
+**/*.pyc
+output.jsonl
+out.jsonl
+out*.jsonl
+out*.err

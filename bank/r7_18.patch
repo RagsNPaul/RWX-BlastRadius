@@ -1,0 +1,12 @@
+diff --git a/sqlglot/parser.py b/sqlglot/parser.py
+--- a/sqlglot/parser.py
++++ b/sqlglot/parser.py
+@@ -432,7 +432,7 @@
+             this=seq_get(args, 0),
+             to=exp.DataType(this=exp.DType.TEXT),
+         ),
+-        "GENERATE_DATE_ARRAY": lambda args: exp.GenerateDateArray(
++        "GENERATE_DATE_ARRAYX": lambda args: exp.GenerateDateArray(
+             start=seq_get(args, 0),
+             end=seq_get(args, 1),
+             step=seq_get(args, 2) or exp.Interval(this=exp.Literal.string(1), unit=exp.var("DAY")),

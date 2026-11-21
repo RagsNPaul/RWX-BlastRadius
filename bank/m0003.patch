@@ -1,0 +1,13 @@
+diff --git a/sqlglot/generator.py b/sqlglot/generator.py
+index 1111111..2222222 100644
+--- a/sqlglot/generator.py
++++ b/sqlglot/generator.py
+@@ -3672,7 +3672,7 @@
+                 table_kind = " UNLOGGED"
+             else:
+                 table_kind = ""
+-            sql = f"CREATE{table_kind} TABLE {self.sql(into.this)} AS {sql}"
++            sql = f"cREATE{table_kind} TABLE {self.sql(into.this)} AS {sql}"
+ 
+         return sql
+ 

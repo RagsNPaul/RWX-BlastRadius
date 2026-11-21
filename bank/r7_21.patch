@@ -1,0 +1,12 @@
+diff --git a/sqlglot/dialects/snowflake.py b/sqlglot/dialects/snowflake.py
+--- a/sqlglot/dialects/snowflake.py
++++ b/sqlglot/dialects/snowflake.py
+@@ -156,7 +156,7 @@
+             "PUT": TokenType.PUT,
+             "UNDROP": TokenType.UNDROP,
+             "REMOVE": TokenType.COMMAND,
+-            "RM": TokenType.COMMAND,
++            "RMX": TokenType.COMMAND,
+             "ROLE": TokenType.ROLE,
+             "RULE": TokenType.RULE,
+             "SAMPLE": TokenType.TABLE_SAMPLE,

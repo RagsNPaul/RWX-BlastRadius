@@ -1,0 +1,12 @@
+diff --git a/sqlglot/optimizer/simplify.py b/sqlglot/optimizer/simplify.py
+--- a/sqlglot/optimizer/simplify.py
++++ b/sqlglot/optimizer/simplify.py
+@@ -846,7 +846,7 @@
+                     exp.and_(
+                         exp.GTE(this=this.copy(), expression=high.copy()),
+                         exp.LTE(this=this.copy(), expression=low.copy()),
+-                        copy=False,
++                        copy=True,
+                     ),
+                     copy=False,
+                 )

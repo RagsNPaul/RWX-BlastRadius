@@ -1,0 +1,13 @@
+diff --git a/tests/fixtures/optimizer/annotate_functions.sql b/tests/fixtures/optimizer/annotate_functions.sql
+index 1111111..2222222 100644
+--- a/tests/fixtures/optimizer/annotate_functions.sql
++++ b/tests/fixtures/optimizer/annotate_functions.sql
+@@ -7805,7 +7805,7 @@
+ --------------------------------------
+ 
+ PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY tbl.double_col);
+-DOUBLE;
++DOUBL1;
+ 
+ PERCENTILE_DISC(0.5) WITHIN GROUP (ORDER BY tbl.double_col);
+ DOUBLE;

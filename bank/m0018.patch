@@ -1,0 +1,26 @@
+diff --git a/sqlglot/generators/duckdb.py b/sqlglot/generators/duckdb.py
+index 1111111..2222222 100644
+--- a/sqlglot/generators/duckdb.py
++++ b/sqlglot/generators/duckdb.py
+@@ -4419,7 +4419,7 @@
+         if (
+             not validated_flags
+             and group
+-            and group.name == str(self.dialect.REGEXP_EXTRACT_DEFAULT_GROUP)
++            and group.name != str(self.dialect.REGEXP_EXTRACT_DEFAULT_GROUP)
+         ):
+             group = None
+ 
+diff --git a/sqlglot/parsers/teradata.py b/sqlglot/parsers/teradata.py
+index 1111111..2222222 100644
+--- a/sqlglot/parsers/teradata.py
++++ b/sqlglot/parsers/teradata.py
+@@ -303,7 +303,7 @@
+         self,
+         functions: dict[str, t.Callable] | None = None,
+         anonymous: bool = False,
+-        optional_parens: bool = True,
++        optional_parens: bool = False,
+         any_token: bool = False,
+     ) -> exp.Expr | None:
+         # Column data attributes are not function arguments.

@@ -1,0 +1,12 @@
+diff --git a/sqlglot/parser.py b/sqlglot/parser.py
+--- a/sqlglot/parser.py
++++ b/sqlglot/parser.py
+@@ -419,7 +419,7 @@
+         "COUNT": lambda args: exp.Count(this=seq_get(args, 0), expressions=args[1:], big_int=True),
+         "CONCAT": lambda args, dialect: exp.Concat(
+             expressions=args,
+-            safe=not dialect.STRICT_STRING_CONCAT,
++            safe=dialect.STRICT_STRING_CONCAT,
+             coalesce=dialect.CONCAT_COALESCE,
+         ),
+         "CONCAT_WS": lambda args, dialect: exp.ConcatWs(

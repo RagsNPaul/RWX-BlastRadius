@@ -1,6 +1,7 @@
 output.jsonl
 __pycache__/
 .venv/
-sqlglot/
+/sqlglot/
 .coverage*
 *.pkl
+bank/logs/

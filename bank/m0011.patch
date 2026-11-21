@@ -1,0 +1,13 @@
+diff --git a/sqlglot/expressions/properties.py b/sqlglot/expressions/properties.py
+index 1111111..2222222 100644
+--- a/sqlglot/expressions/properties.py
++++ b/sqlglot/expressions/properties.py
+@@ -507,7 +507,7 @@
+ 
+ 
+ class SortKeyProperty(Property):
+-    arg_types = {"this": True, "compound": False}
++    arg_types = {"this": True, "compound": True}
+ 
+ 
+ class SqlReadWriteProperty(Property):

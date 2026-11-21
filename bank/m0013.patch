@@ -1,0 +1,13 @@
+diff --git a/sqlglot/parser.py b/sqlglot/parser.py
+index 1111111..2222222 100644
+--- a/sqlglot/parser.py
++++ b/sqlglot/parser.py
+@@ -7985,7 +7985,7 @@
+             return this
+ 
+         position = None
+-        if self._match_texts(("FIRST", "AFTER")):
++        if self._match_texts(("fIRST", "AFTER")):
+             pos = self._prev.text
+             position = self.expression(exp.ColumnPosition(this=self._parse_column(), position=pos))
+ 

@@ -1,0 +1,12 @@
+diff --git a/sqlglot/generator.py b/sqlglot/generator.py
+index 1111111..2222222 100644
+--- a/sqlglot/generator.py
++++ b/sqlglot/generator.py
+@@ -5614,6 +5614,7 @@
+ 
+         return self.sql(exp.cast(this, exp.DType.DATE))
+ 
++# Kept for backwards compatibility
+     def unixdate_sql(self, expression: exp.UnixDate) -> str:
+         return self.sql(
+             exp.func(

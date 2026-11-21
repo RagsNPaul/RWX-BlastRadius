@@ -1,0 +1,13 @@
+diff --git a/tests/fixtures/optimizer/annotate_functions.sql b/tests/fixtures/optimizer/annotate_functions.sql
+index 1111111..2222222 100644
+--- a/tests/fixtures/optimizer/annotate_functions.sql
++++ b/tests/fixtures/optimizer/annotate_functions.sql
+@@ -467,7 +467,7 @@
+ BINARY;
+ 
+ # dialect: spark, databricks
+-CURRENT_TIMEZONE();
++CURRENT_TIMEZON1();
+ STRING;
+ 
+ # dialect: hive, spark2, spark, databricks

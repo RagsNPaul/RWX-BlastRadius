@@ -1,0 +1,12 @@
+diff --git a/sqlglot/expressions/query.py b/sqlglot/expressions/query.py
+--- a/sqlglot/expressions/query.py
++++ b/sqlglot/expressions/query.py
+@@ -458,7 +458,7 @@
+         "recursive": False,
+         "search": False,
+         "cycle": False,
+-        "udfs": False,
++        "udfs": True,
+     }
+ 
+     @property

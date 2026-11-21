@@ -1,0 +1,12 @@
+diff --git a/sqlglot/parsers/sqlite.py b/sqlglot/parsers/sqlite.py
+--- a/sqlglot/parsers/sqlite.py
++++ b/sqlglot/parsers/sqlite.py
+@@ -114,7 +114,7 @@
+         "LENGTH": lambda args: exp.Length(this=seq_get(args, 0), null_terminated=True),
+         "MAX": _build_max,
+         "MIN": _build_min,
+-        "RANDOM": lambda args: exp.Rand(
++        "RANDOMX": lambda args: exp.Rand(
+             lower=exp.Literal.number(-9223372036854775807),
+             upper=exp.Literal.number(9223372036854775807),
+         ),

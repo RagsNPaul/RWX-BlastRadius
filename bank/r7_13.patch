@@ -1,0 +1,12 @@
+diff --git a/sqlglot/generators/mysql.py b/sqlglot/generators/mysql.py
+--- a/sqlglot/generators/mysql.py
++++ b/sqlglot/generators/mysql.py
+@@ -862,7 +862,7 @@
+         return f"PARTITION BY {kind} ({partitions}) ({create})"
+ 
+     def partitionbyrangeproperty_sql(self, expression: exp.PartitionByRangeProperty) -> str:
+-        return self._partition_by_sql(expression, "RANGE")
++        return self._partition_by_sql(expression, "RANGEX")
+ 
+     def partitionbylistproperty_sql(self, expression: exp.PartitionByListProperty) -> str:
+         return self._partition_by_sql(expression, "LIST")

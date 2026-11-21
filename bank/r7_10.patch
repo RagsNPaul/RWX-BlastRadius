@@ -1,0 +1,12 @@
+diff --git a/sqlglot/lineage.py b/sqlglot/lineage.py
+--- a/sqlglot/lineage.py
++++ b/sqlglot/lineage.py
+@@ -206,7 +206,7 @@
+     upstream: Node | None = None,
+     source_name: str | None = None,
+     reference_node_name: str | None = None,
+-    trim_selects: bool = True,
++    trim_selects: bool = False,
+     _cache: dict[tuple, Node] | None = None,
+     _scope_meta: dict[int, tuple[bool, dict[str, exp.Expr]]] | None = None,
+     on_node: t.Callable[[Node], None] | None = None,
