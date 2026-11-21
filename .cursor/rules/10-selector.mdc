@@ -45,7 +45,8 @@ patch.py → classify.py → rules.py → pack.py → main.py
      `NARROW_CLASS` defaults to on. With it on, a class that is not created at import and that has an inst entry
      drops `file_union` and selects those tests plus tests whose source or an opened fixture
      contains a string literal the edit removed or added (`maps/words.json`, case-insensitive).
-     `WORD_NO_EXPENSIVE=1` drops tests over 3s from that word match.
+     `WORD_NO_EXPENSIVE=1` drops tests over 1s from that word match.
+     `WORD_OFF=1` searches only string literals the patch removes and does not write back.
      `CLASS_CAP=1`, after the import check has narrowed, uses the class file's `file_union`
      when the class was instantiated by more than 400 tests.
      `DIALECT_FILE_OFF=1` does not add `tests/dialects/test_<name>.py` on top of line coverage

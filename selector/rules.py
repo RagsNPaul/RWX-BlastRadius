@@ -50,8 +50,13 @@ def _expensive_check():
 
 
 def _word_no_expensive():
-    """The word rule may not add a test that takes over 3s. WORD_NO_EXPENSIVE=0 keeps them."""
+    """The word rule may not add a test that takes over 1s. WORD_NO_EXPENSIVE=0 keeps them."""
     return os.environ.get("WORD_NO_EXPENSIVE", "0") == "1"
+
+
+def _word_off():
+    """The word rule searches only string literals the patch removes and does not write back."""
+    return os.environ.get("WORD_OFF", "0") == "1"
 
 
 def _class_cap():
@@ -70,6 +75,7 @@ def _dialect_file_off():
 
 
 _SLOW_MS = 3000
+_WORD_SLOW_MS = 1000
 _CLASS_CAP = 400
 
 
@@ -159,7 +165,7 @@ class Maps:
         for word in words:
             found.update(self._words.get(word, ()))
         if _word_no_expensive():
-            found = {number for number in found if self.durations[number] <= _SLOW_MS}
+            found = {number for number in found if self.durations[number] <= _WORD_SLOW_MS}
         return found
 
     def _load_enums(self):
@@ -410,14 +416,15 @@ def _changed(hunks, unit, line_count):
     the tests that reach them are the ones that can reach the new lines. The same is done when
     the new lines are indented less than the removed ones, since they may run where those did not.
     """
-    replaced, around = {}, set()
+    replaced, around, neighbors = {}, set(), set()
 
     def nearest(line, step):
         while 0 < line <= line_count:
             if unit(line):
                 around.add(line)
-                return
+                return line
             line += step
+        return None
 
     for rows in hunks:
         i = 0
@@ -435,8 +442,10 @@ def _changed(hunks, unit, line_count):
                 if _neighbor_off():
                     nearest(block[0][1], 1)  # the statement the new lines are inserted into
                 else:
-                    nearest(block[0][1] - 1, -1)
+                    back = nearest(block[0][1] - 1, -1)
                     nearest(block[0][1], 1)
+                    if back is not None:
+                        neighbors.add(back)
                 continue
             for position, (number, _) in enumerate(removed):
                 if unit(number):
@@ -450,7 +459,7 @@ def _changed(hunks, unit, line_count):
                 nearest(removed[0][0] - 1, -1)
                 nearest(removed[-1][0] + 1, 1)
     replaced.update(dict.fromkeys(around))
-    return replaced
+    return replaced, neighbors
 
 
 def _string_literals(text):
@@ -561,7 +570,9 @@ def _class_edits(hunks, tree, path):
         if slot is None:
             edits[key] = None
             continue
-        words, searchable = _words_of(slot[0] ^ slot[1])
+        # WORD_OFF keeps a literal only when the patch removes it and does not write it back.
+        literals = (slot[0] - slot[1]) if _word_off() else slot[0] ^ slot[1]
+        words, searchable = _words_of(literals)
         edits[key] = (words, searchable)
     return edits
 
@@ -1210,7 +1221,7 @@ def _source(path, hunks, maps, blame=None, check=None):
     indexes, at_import, docstring = set(), False, False
     class_keys, import_ran, module_import = set(), False, False
     doc_spans, class_spans, union_where, word_at = [], {}, [], {}
-    changed = _changed(hunks, unit, len(old_lines))
+    changed, neighbor_lines = _changed(hunks, unit, len(old_lines))
     skip = set()
     if _equiv_enum():
         skip = _equivalent_lines(
@@ -1262,6 +1273,23 @@ def _source(path, hunks, maps, blame=None, check=None):
                 if covered:
                     import_ran = True  # module-level code that tests ran and that also runs at import
                     _note(blame, "all:import-line", _where(path, first, last), maps.everything)
+    if blame is not None and neighbor_lines:
+        def covered_by(lines):
+            found = set()
+            for line in lines:
+                if line in skip:
+                    continue
+                first, last, node = unit(line)
+                if isinstance(node, _DEFINITIONS):
+                    last = node.end_lineno
+                for number in range(first, last + 1):
+                    index = table.get(str(number))
+                    if index is not None:
+                        found.update(maps.tests_of(index))
+            return found
+        only = covered_by(neighbor_lines) - covered_by(set(changed) - neighbor_lines)
+        if only:
+            _note(blame, "neighbor", path, only)
     for index in indexes:
         tests.update(maps.tests_of(index))
     reason = "line" if indexes else "uncovered"  # rule 5: a line that never ran selects nothing
@@ -1307,6 +1335,8 @@ def _source(path, hunks, maps, blame=None, check=None):
             _note(blame, "all:import-unmapped", path, maps.everything)
             return maps.everything, "all:import-unmapped"  # imported, yet no test is known to use it
         union = set(maps.file_union[path])
+        if indexes:
+            _note(blame, "dialect", path, (_dialect_tests(path, maps) & union) - tests)
         if _dialect_file_off() and indexes:
             union -= _dialect_tests(path, maps) - tests
         tests.update(union)

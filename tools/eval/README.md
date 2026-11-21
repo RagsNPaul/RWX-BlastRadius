@@ -20,6 +20,11 @@ Paths are flags. `make eval` runs ground truth, then the scorer.
   plus a blended board estimate. Later reports keep the holdout separate.
   Truths that list `test_max_nodes` or `test_execute_tpcds` are remeasured in the
   pinned image with `gt.py --timeout=600 -n 4`.
+- `rule_cost.py --sqlglot DIR --python PY --tests sample/tests.json --bank bank --maps maps`
+  For every sample, holdout, and bank commit, packing seconds that line, class, word,
+  neighbor, and dialect-file coverage added beyond the true failures. Then each of
+  `WORD_OFF`, `WORD_NO_EXPENSIVE`, `NEIGHBOR_OFF`, `DIALECT_FILE_OFF`, and `CLASS_CAP`
+  alone, with net = holdout packing saved − 300 × extra holdout misses.
 - `tune.py --sqlglot DIR --python PY --tests sample/tests.json --bank bank --maps maps`
   Runs all 64 on/off mixes of `IMPORT_CHECK`, `EXPENSIVE_CHECK`, and the four V3-3 flags
   on the sample and on `bank/holdout.txt`. Prints them sorted by the V3-0 board estimate
