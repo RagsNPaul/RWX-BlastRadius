@@ -13,6 +13,17 @@ Paths are flags. `make eval` runs ground truth, then the scorer.
   KIND is `random` (lines in `maps/lines` and `import_lines`), `classattr`, `enumcmp`,
   `copyflag`, `deadbranch`, `fixture`, or `comment`. Ids are `r<seed>_<kind>_<nn>`
   and an existing patch is never overwritten.
+- `buckets.py --sqlglot DIR --python PY --tests sample/tests.json --bank bank --maps maps`
+  Runs the selector on the sample and the bank. Prints, for each set and for the
+  frozen bank holdout (`bank/holdout.txt`, 30% of bank ids, seed 0, kept once written),
+  the cost split into best, fallback (`all:` reasons), expensive-test waste, and other,
+  plus a blended board estimate. Later reports keep the holdout separate.
+  Truths that list `test_max_nodes` or `test_execute_tpcds` are remeasured in the
+  pinned image with `gt.py --timeout=600 -n 4`.
+- `tune.py --sqlglot DIR --python PY --tests sample/tests.json --bank bank --maps maps`
+  Runs all 64 on/off mixes of `IMPORT_CHECK`, `EXPENSIVE_CHECK`, and the four V3-3 flags
+  on the sample and on `bank/holdout.txt`. Prints them sorted by the V3-0 board estimate
+  (holdout s/commit in place of the bank), with sample misses, holdout misses, and CPU.
 - `ev.py --sqlglot DIR --python PY --tests sample/tests.json --bank bank --maps maps`
   Reads `sample/answers.json`, every `bank/<id>.json`, and `bank/truth.json`.
   Runs `selector/main.py` and prints, per set: commits, simulated seconds, seconds per

@@ -10,6 +10,10 @@ import io
 import json
 import os
 import re
+import resource
+import shutil
+import subprocess
+import sys
 import tokenize
 
 from classify import classify
@@ -35,6 +39,40 @@ def _equiv_dead():
     return os.environ.get("EQUIV_DEAD", "1") == "1"
 
 
+def _import_check():
+    """Fingerprint the patched import before taking every test. IMPORT_CHECK=0 keeps the fallback."""
+    return os.environ.get("IMPORT_CHECK", "1") == "1"
+
+
+def _expensive_check():
+    """Drop a selected test over 3s when a cheap check shows the patch cannot change it."""
+    return os.environ.get("EXPENSIVE_CHECK", "0") == "1"
+
+
+def _word_no_expensive():
+    """The word rule may not add a test that takes over 3s. WORD_NO_EXPENSIVE=0 keeps them."""
+    return os.environ.get("WORD_NO_EXPENSIVE", "0") == "1"
+
+
+def _class_cap():
+    """A class used by more than 400 tests keeps its file's tests after the import check."""
+    return os.environ.get("CLASS_CAP", "0") == "1"
+
+
+def _neighbor_off():
+    """A pure insertion maps to the statement it lands in, not the statements on both sides."""
+    return os.environ.get("NEIGHBOR_OFF", "0") == "1"
+
+
+def _dialect_file_off():
+    """Line coverage of a dialect does not also add that dialect's whole test file."""
+    return os.environ.get("DIALECT_FILE_OFF", "0") == "1"
+
+
+_SLOW_MS = 3000
+_CLASS_CAP = 400
+
+
 _ENUM_SWAP = {
     (ast.Is, ast.Eq),
     (ast.Eq, ast.Is),
@@ -51,6 +89,7 @@ class Maps:
         with open(os.path.join(maps_dir, "index.json")) as f:
             index = json.load(f)
         self.file_union = index["file_union"]  # source -> tests that ran it or use its module
+        self.durations = index["durations"]  # milliseconds, indexed by test number
         self.import_lines = index["import_lines"]  # source -> lines that run at import
         self.opens = index["opens"]  # data file -> tests that opened it
         self.py_reads = index["py_reads"]  # source -> tests that read it as text
@@ -61,6 +100,7 @@ class Maps:
         self._sets = self._blind = self._tests = self._importers = self._words = self._enums = None
         self._scalars = {}
         self._lines, self._imported, self._sources = {}, {}, {}
+        self._import_fp = self._tpc = self._max_lines = None
 
     def check(self, tests):
         """The maps are keyed by test number: refuse a tests.json that numbers tests differently."""
@@ -104,6 +144,8 @@ class Maps:
         found = set()
         for word in words:
             found.update(self._words.get(word, ()))
+        if _word_no_expensive():
+            found = {number for number in found if self.durations[number] <= _SLOW_MS}
         return found
 
     def _load_enums(self):
@@ -269,6 +311,26 @@ def _module_name(path):
     return module
 
 
+def _class_union(key, maps):
+    """file_union of the module that defines `module:QualName`, when the map has it."""
+    module = key.partition(":")[0]
+    base = module.replace(".", "/")
+    for path in (base + ".py", base + "/__init__.py"):
+        if path in maps.file_union:
+            return maps.file_union[path]
+    return None
+
+
+def _dialect_tests(path, maps):
+    """Tests in tests/dialects/test_<name>.py for a sqlglot/dialects/<name>.py edit."""
+    if not path.startswith("sqlglot/dialects/") or not path.endswith(".py"):
+        return set()
+    name = os.path.basename(path)[:-3]
+    if name == "__init__":
+        return set()
+    return set(maps.testfile.get(f"tests/dialects/test_{name}.py", ()))
+
+
 def _start(node):
     return min([node.lineno] + [d.lineno for d in getattr(node, "decorator_list", ())])
 
@@ -356,8 +418,11 @@ def _changed(hunks, unit, line_count):
             removed = [(number, row) for kind, number, row in block if kind == "-"]
             added = [row for kind, _, row in block if kind == "+"]
             if not removed:
-                nearest(block[0][1] - 1, -1)
-                nearest(block[0][1], 1)
+                if _neighbor_off():
+                    nearest(block[0][1], 1)  # the statement the new lines are inserted into
+                else:
+                    nearest(block[0][1] - 1, -1)
+                    nearest(block[0][1], 1)
                 continue
             for position, (number, _) in enumerate(removed):
                 if unit(number):
@@ -902,10 +967,210 @@ def _span_wheres(path, spans):
     return [_where(path, first, last) for first, last in spans]
 
 
+def _owner_class(tree, line):
+    """Innermost class whose span contains `line`, including a line inside one of its methods."""
+    best = None
+
+    def walk(node, prefix):
+        nonlocal best
+        for child in ast.iter_child_nodes(node):
+            if not hasattr(child, "lineno"):
+                continue
+            end = getattr(child, "end_lineno", child.lineno)
+            if not child.lineno <= line <= end:
+                continue
+            if isinstance(child, ast.ClassDef):
+                qual = prefix + [child.name]
+                span = end - child.lineno
+                if best is None or span < best[0]:
+                    best = (span, qual)
+                walk(child, qual)
+            else:
+                walk(child, prefix)
+
+    walk(tree, [])
+    return ".".join(best[1]) if best else None
+
+
+def _edited_classes(files, maps):
+    """module:QualName of every class a hunk touches, methods included."""
+    found = set()
+    for file in files:
+        path = file.old
+        if not path or file.binary or not file.hunks or not path.endswith(".py"):
+            continue
+        if not path.startswith("sqlglot/"):
+            continue
+        try:
+            _text, tree, _dump = maps.source(path)
+        except (OSError, SyntaxError, ValueError):
+            continue
+        lines = set()
+        for rows in file.hunks:
+            for kind, number, _row in rows:
+                if kind in ("-", "+") and number:
+                    lines.add(number)
+        for line in lines:
+            qual = _owner_class(tree, line)
+            if qual:
+                found.add(f"{_module_name(path)}:{qual}")
+    return found
+
+
+def _key_owner(key, classes):
+    """The edited class a fingerprint key belongs to, or None when it sits outside all of them."""
+    module, _, rest = key.partition(":")
+    owner = None
+    for cls in classes:
+        class_module, _, name = cls.partition(":")
+        if module == class_module and (rest == name or rest.startswith(name + ".")):
+            if owner is None or len(name) > len(owner[1]):
+                owner = (cls, name)
+    return owner[0] if owner else None
+
+
+def _fingerprint_decision(original, patched, classes):
+    """Narrow only when every changed key lives on a class this patch edited."""
+    changed = set()
+    for key in set(original) | set(patched):
+        if original.get(key) == patched.get(key):
+            continue
+        owner = _key_owner(key, classes)
+        if owner is None:
+            return "all", ()
+        changed.add(owner)
+    return "narrow", tuple(sorted(changed))
+
+
+def _cpu_seconds():
+    total = 0.0
+    for who in (resource.RUSAGE_SELF, resource.RUSAGE_CHILDREN):
+        usage = resource.getrusage(who)
+        total += usage.ru_utime + usage.ru_stime
+    return total
+
+
+_TREE = "/tmp/s"
+_TREE_STATE = {"ready": False}
+
+
+def _python_env():
+    return {"PYTHONPATH": _TREE, "PYTHONDONTWRITEBYTECODE": "1", "PYTHONHASHSEED": "0"}
+
+
+def _prepare_tree(files, maps):
+    """Copy the package to /tmp/s and apply the patch. Reused by both checks."""
+    if _TREE_STATE["ready"]:
+        return True
+    if os.path.isdir(_TREE):
+        shutil.rmtree(_TREE)
+    shutil.copytree(
+        os.path.join(maps.source_dir, "sqlglot"),
+        os.path.join(_TREE, "sqlglot"),
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+    )
+    for file in files:
+        path = file.old or file.new
+        if not path or file.binary or not path.startswith("sqlglot/"):
+            continue
+        full = os.path.join(_TREE, path)
+        if file.old is None:
+            os.makedirs(os.path.dirname(full), exist_ok=True)
+            text = ""
+        elif not os.path.isfile(full):
+            return False
+        else:
+            with open(full, encoding="utf-8") as handle:
+                text = handle.read()
+        if file.new is None:
+            os.remove(full)
+            continue
+        written = apply(text, file.hunks) if file.hunks else text
+        with open(full, "w", encoding="utf-8") as handle:
+            handle.write(written)
+    _TREE_STATE["ready"] = True
+    return True
+
+
+def _cleanup_tree():
+    shutil.rmtree(_TREE, ignore_errors=True)
+    _TREE_STATE["ready"] = False
+
+
+def _run_python(script, stdin=None, timeout=30):
+    return subprocess.run(
+        [sys.executable, "-S", script],
+        cwd="/tmp",
+        env=_python_env(),
+        input=stdin,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+    )
+
+
+def _json_out(stdout):
+    start = stdout.find("{")
+    if start < 0:
+        return None
+    return json.loads(stdout[start:])
+
+
+def _patched_fingerprint(files, maps, keep=False):
+    """Copy the package, apply the patch, import it. None means the import did not survive."""
+    script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fingerprint.py")
+    try:
+        if not _prepare_tree(files, maps):
+            return None
+        proc = _run_python(script)
+        if proc.returncode != 0:
+            return None
+        return _json_out(proc.stdout)
+    finally:
+        if not keep:
+            _cleanup_tree()
+
+
+def _run_import_check(files, maps, keep=False):
+    """-> (decision, changed classes, cpu seconds). A failed import selects every test."""
+    start = _cpu_seconds()
+    try:
+        patched = _patched_fingerprint(files, maps, keep)
+        if patched is None:
+            return "all", (), _cpu_seconds() - start
+        if maps._import_fp is None:
+            with open(os.path.join(maps.maps_dir, "import_fp.json"), encoding="utf-8") as handle:
+                maps._import_fp = json.load(handle)
+        decision, classes = _fingerprint_decision(maps._import_fp, patched, _edited_classes(files, maps))
+        return decision, classes, _cpu_seconds() - start
+    except (OSError, ValueError, subprocess.TimeoutExpired, json.JSONDecodeError):
+        return "all", (), _cpu_seconds() - start
+
+
 # --- rules 1-6: sqlglot/**/*.py -------------------------------------------------------------
-def _source(path, hunks, maps, blame=None):
+def _source(path, hunks, maps, blame=None, check=None):
     tests = set(maps.py_reads.get(path, ()))  # rule 7 also holds for a source that tests read as text
     _note(blame, "py-read", path, tests)
+    narrowed_import = False
+
+    def keep_all():
+        """False when the import fingerprint changed only inside a class this patch edited."""
+        nonlocal narrowed_import
+        if check is None:
+            return True
+        decision, classes, _cpu = check()
+        if decision != "narrow":
+            return True
+        narrowed_import = True
+        for key in classes:
+            inst = maps.inst.get(key) or ()
+            if _class_cap() and len(inst) > _CLASS_CAP:
+                union = _class_union(key, maps)
+                if union is not None:
+                    inst = union
+            tests.update(inst)
+            _note(blame, "class", key, inst)
+        return False
     text, tree, dump = maps.source(path)
     try:
         # Parsed from bytes, as the import system does, so a broken encoding line is an error here too
@@ -992,11 +1257,13 @@ def _source(path, hunks, maps, blame=None):
     need_union = module_import
     for key in class_keys:
         if key in maps.import_classes:
-            for other in class_keys:
-                if other in maps.import_classes:
-                    for where in _span_wheres(path, class_spans.get(other)):
-                        _note(blame, "all:import-class", where, maps.everything)
-            return maps.everything, "all:import-class"
+            if keep_all():
+                for other in class_keys:
+                    if other in maps.import_classes:
+                        for where in _span_wheres(path, class_spans.get(other)):
+                            _note(blame, "all:import-class", where, maps.everything)
+                return maps.everything, "all:import-class"
+            continue
         inst_tests = maps.inst.get(key)
         info = None
         if _narrow_class() and inst_tests:
@@ -1019,16 +1286,19 @@ def _source(path, hunks, maps, blame=None):
                 _note(blame, "class", where, inst_tests or ())
                 if blame is not None:
                     union_where.append(where)
-    if import_ran:
+    if import_ran and keep_all():
         return maps.everything, "all:import-line"
     if at_import and need_union:
         if path not in maps.file_union:
             _note(blame, "all:import-unmapped", path, maps.everything)
             return maps.everything, "all:import-unmapped"  # imported, yet no test is known to use it
-        tests.update(maps.file_union[path])
+        union = set(maps.file_union[path])
+        if _dialect_file_off() and indexes:
+            union -= _dialect_tests(path, maps) - tests
+        tests.update(union)
         tests.update(maps.blind())
         for where in union_where or [path]:
-            _note(blame, "import->file", where, maps.file_union[path])
+            _note(blame, "import->file", where, union)
             _note(blame, "blind", where, maps.blind())
         reason = "import->file"
         if class_keys:
@@ -1049,6 +1319,8 @@ def _source(path, hunks, maps, blame=None):
         reason += "+docstring"
     if skip and changed and all(line in skip for line in changed) and reason == "uncovered":
         reason = "equiv-enum"
+    if narrowed_import and not reason.startswith("all:"):
+        reason += "+import-check"
     return tests, reason
 
 
@@ -1111,7 +1383,7 @@ def _test(path, maps, blame=None):
     return tests, "testfile"
 
 
-def _file(file, files, maps, blame=None):
+def _file(file, files, maps, blame=None, check=None):
     paths = {path for path in (file.old, file.new) if path}
     kinds = {classify(path, maps.opens) for path in paths}
     if kinds == {"data"}:  # changed, added, deleted or renamed: every name it had or gets
@@ -1123,7 +1395,7 @@ def _file(file, files, maps, blame=None):
         _note(blame, reason, file.old or file.new, maps.everything)
         return maps.everything, reason
     if kinds == {"source"}:
-        return _source(file.old, file.hunks, maps, blame)
+        return _source(file.old, file.hunks, maps, blame, check)
     if kinds == {"test"}:
         return _test(file.old, maps, blame)
     _note(blame, "all:other", file.old or file.new, maps.everything)
@@ -1137,10 +1409,20 @@ def select(files, maps, blame=None):
     consulted. main.py leaves it empty, so a scored run records nothing.
     """
     selected, reasons = set(), []
+    box = {}
+
+    def check():
+        if "value" not in box:
+            box["value"] = _run_import_check(files, maps)
+        return box["value"]
+
+    runner = check if _import_check() else None
     for file in files:
-        tests, reason = _file(file, files, maps, blame)
+        tests, reason = _file(file, files, maps, blame, runner)
         selected.update(tests)
         reasons.append(reason)
         if len(selected) == len(maps.everything):
             break
+    if "value" in box:
+        reasons.append(f"check={box['value'][2]:.3f}s")
     return selected, reasons

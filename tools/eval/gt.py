@@ -29,6 +29,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--python", required=True, help="interpreter with pytest, xdist, and pytest-timeout")
     parser.add_argument("--tests", required=True, type=Path, help="sample/tests.json")
     parser.add_argument("--bank", required=True, type=Path, help="directory of *.patch files")
+    parser.add_argument("--timeout", type=int, default=120, help="per-test pytest-timeout seconds")
+    parser.add_argument("-n", dest="workers", default="auto", help="pytest-xdist worker count")
     parser.add_argument("patches", nargs="*", type=Path, help="run only these patches")
     return parser.parse_args()
 
@@ -76,7 +78,7 @@ def failing_ids(out_path: Path, number: dict[str, int], by_file: dict[str, list[
     return sorted(failed), unmapped
 
 
-def run_one(patch: Path, sqlglot: Path, python: str, number, by_file) -> list[int]:
+def run_one(patch: Path, sqlglot: Path, python: str, number, by_file, timeout: int, workers: str) -> list[int]:
     """Copy sqlglot, apply the patch, return the failing test numbers."""
     work = Path(tempfile.mkdtemp(prefix="gt-"))
     try:
@@ -101,11 +103,11 @@ def run_one(patch: Path, sqlglot: Path, python: str, number, by_file) -> list[in
         proc = subprocess.run(
             [
                 python, "-m", "pytest", "tests",
-                "-n", "auto",
+                "-n", str(workers),
                 "-q",
                 "-p", "no:cacheprovider",
                 "-p", "gtplug",
-                "--timeout=120",
+                f"--timeout={timeout}",
             ],
             cwd=tree,
             env=env,
@@ -183,7 +185,9 @@ def main() -> int:
         error = None
         for attempt in (1, 2):
             try:
-                failing = run_one(patch, args.sqlglot, args.python, number, by_file)
+                failing = run_one(
+                    patch, args.sqlglot, args.python, number, by_file, args.timeout, args.workers
+                )
                 break
             except RuntimeError as caught:
                 error = caught

@@ -7,7 +7,9 @@ alwaysApply: false
 # selector/: runtime rules
 
 ## Speed (CPU is charged)
-- Python stdlib only. No numpy, no coverage, no pytest, no subprocess, no threads.
+- Python stdlib only. No numpy, no coverage, no pytest, no threads.
+  `IMPORT_CHECK` defaults to on (`IMPORT_CHECK=0` keeps the all-tests fallback). It may run one `python -S`
+  subprocess, cwd `/tmp`, to fingerprint a patched copy of the package. Its CPU is charged.
 - Load nothing you don't need: the map is split per source file (`maps/lines/<path>.json`);
   load only the files a patch touches. Keep `maps/index.json` (file_union, opens, testfile, durations) small.
 - Parse each original source at most once per run; cache ASTs in a dict.
@@ -29,18 +31,28 @@ patch.py → classify.py → rules.py → pack.py → main.py
    if/elif/else/except/loop body that no test runs (no line-map entry, not an import line), and
    the condition line is untouched → nothing for that file. A body that still has a covered line stays.
 2. Changed old lines: '-' lines by number; pure '+' insertions → the lines on both sides.
+   `NEIGHBOR_OFF=1` maps a pure insertion to the statement it is inserted into.
    Map each line to the FIRST line of its innermost enclosing `ast.stmt` (coverage records
    multi-line statements by their first line). A `def`/`class`/decorator line → the whole body's lines.
 3. Line covered by tests → those tests.
 4. Line executed at import (`import_lines`): `file_union[file]`, plus
    - class-body edit of class C (not inside a function) → tests that instantiated C or a subclass
      (`maps/inst.json`, key `module:QualName`, MRO already expanded), unioned with `file_union`;
-     if C is in `maps/import_classes.json` → every test.
+     if C is in `maps/import_classes.json` → every test (unless `IMPORT_CHECK` narrows it, below).
      `NARROW_CLASS` defaults to on. With it on, a class that is not created at import and that has an inst entry
      drops `file_union` and selects those tests plus tests whose source or an opened fixture
      contains a string literal the edit removed or added (`maps/words.json`, case-insensitive).
+     `WORD_NO_EXPENSIVE=1` drops tests over 3s from that word match.
+     `CLASS_CAP=1`, after the import check has narrowed, uses the class file's `file_union`
+     when the class was instantiated by more than 400 tests.
+     `DIALECT_FILE_OFF=1` does not add `tests/dialects/test_<name>.py` on top of line coverage
+     of `sqlglot/dialects/<name>.py`.
      No inst entry, or a literal that is not a word, keeps `file_union`.
-   - a changed line inside a function that also runs at import → every test
+   - a changed line inside a function that also runs at import → every test.
+     `IMPORT_CHECK=1` first imports a patched copy. A failed import, or a fingerprint
+     that changes outside the edited class, still selects every test. A fingerprint
+     that is unchanged, or that changes only on keys of the edited class, keeps the
+     line rules and adds the class-usage tests of the changed keys.
    - module-level code (not in a class) keeps `file_union`; if tests also ran it → every test
 5. Line never executed → nothing.
 6. Docstring changed → doctest-running tests, if any exist (look in tests/ for doctest usage).
