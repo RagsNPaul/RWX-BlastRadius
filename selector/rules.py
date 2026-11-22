@@ -1325,7 +1325,7 @@ def _ask_worker(payload, timeout=30):
 def _patched_fingerprint(files, maps, keep=False):
     """Ask the worker to patch a fresh tree and fingerprint it. None means the import did not survive."""
     try:
-        reply = _ask_worker({"source": maps.source_dir, "files": _file_payload(files)})
+        reply = _ask_worker({"source": os.path.abspath(maps.source_dir), "files": _file_payload(files)})
         if reply is None:
             return None
         if "raise" in reply:

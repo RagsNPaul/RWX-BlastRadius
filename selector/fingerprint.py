@@ -165,41 +165,78 @@ def prepare_tree(source_dir, files):
 
 def _ensure_import_path():
     """python -S omits a PYTHONPATH entry that does not exist when the process starts."""
+    import os
+
     for entry in reversed([item for item in os.environ.get("PYTHONPATH", "").split(os.pathsep) if item]):
         while entry in sys.path:
             sys.path.remove(entry)
         sys.path.insert(1, entry)
 
 
-def _unload_sqlglot():
-    """Drop the package so the next import reads the tree this request just wrote."""
-    importlib.invalidate_caches()
-    sys.path_importer_cache.clear()
-    for name in list(sys.modules):
-        if name == "sqlglot" or name.startswith("sqlglot."):
-            del sys.modules[name]
+def _collect_forked():
+    """Fingerprint in a child. This process never imports sqlglot, so the next commit is a fresh import."""
+    read_fd, write_fd = os.pipe()
+    try:
+        pid = os.fork()
+    except OSError:
+        os.close(read_fd)
+        os.close(write_fd)
+        raise
+    if pid == 0:
+        try:
+            os.close(read_fd)
+            null = os.open(os.devnull, os.O_RDWR)
+            os.dup2(null, 0)
+            os.dup2(null, 1)
+            os.dup2(null, 2)
+            if null > 2:
+                os.close(null)
+            _ensure_import_path()
+            importlib.invalidate_caches()
+            sys.path_importer_cache.clear()
+            data = json.dumps(collect(), separators=(",", ":")).encode()
+            view = memoryview(data)
+            while view:
+                written = os.write(write_fd, view)
+                view = view[written:]
+            os.close(write_fd)
+        except BaseException:
+            try:
+                os.close(write_fd)
+            except OSError:
+                pass
+            os._exit(1)
+        os._exit(0)
+    os.close(write_fd)
+    chunks = []
+    try:
+        while True:
+            chunk = os.read(read_fd, 1 << 20)
+            if not chunk:
+                break
+            chunks.append(chunk)
+    finally:
+        os.close(read_fd)
+    _child, status = os.waitpid(pid, 0)
+    if not os.WIFEXITED(status) or os.WEXITSTATUS(status) != 0 or not chunks:
+        return None
+    return json.loads(b"".join(chunks))
 
 
 def _reply(payload):
-    import io
-
-    held, sys.stdout = sys.stdout, io.StringIO()
     try:
-        try:
-            request = json.loads(payload)
-            if not prepare_tree(request["source"], request["files"]):
-                body = {"ok": False, "prepared": False}
+        request = json.loads(payload)
+        if not prepare_tree(request["source"], request["files"]):
+            body = {"ok": False, "prepared": False}
+        else:
+            try:
+                fp = _collect_forked()
+            except Exception:
+                body = {"ok": False, "prepared": True}
             else:
-                try:
-                    _ensure_import_path()
-                    _unload_sqlglot()
-                    body = {"ok": True, "prepared": True, "fp": collect()}
-                except Exception:
-                    body = {"ok": False, "prepared": True}
-        except Exception as error:
-            body = {"raise": type(error).__name__, "msg": str(error)}
-    finally:
-        sys.stdout = held
+                body = {"ok": False, "prepared": True} if fp is None else {"ok": True, "prepared": True, "fp": fp}
+    except Exception as error:
+        body = {"raise": type(error).__name__, "msg": str(error)}
     return json.dumps(body, separators=(",", ":")).encode() + b"\n"
 
 
