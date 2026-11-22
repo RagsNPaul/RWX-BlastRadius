@@ -10,3 +10,16 @@ Warm worker RSS 170655744 bytes (0.159 GiB). Available memory 3.360 GiB (free + 
 | 2. Workers from RSS | ≥ 4 | 9 | PASS |
 | 3. No-op children | 0 failures on 20 random lines, tests ≤ 3 s | 0 failures | PASS |
 | 4. Child overhead | mean ≤ 0.10 s over 20 runs | 0.0090 s | PASS |
+
+## Gate P4
+
+Dry run of pass 1, `--workers 5 --limit 300`. A warm worker plus its forked child was 303 MB resident. Nine of those would put total RSS over 90% of the 3.9 GiB available, so N = 5. Killed after 152 results were on disk (153 flushed), then restarted the same command.
+
+The 300 lines are the cheapest priority-folder lines: mean covering-test cost 0.0015 s, versus 10.623 s for all 36,200 covered lines. Raw lines/hour is the cheap-line rate.
+
+| test | required | measured | PASS/FAIL |
+| --- | --- | --- | --- |
+| 1. Restart | 0 mutants redone; all 300 complete | already 153, queued 147, overlap 0, final 300 unique, file prefix identical | PASS |
+| 2. Lines/hour | ≥ 3257.1 = 0.6 × 10857 × 5 / 10 | raw 84781 (killed run, includes warmup); restart raw 92245 | PASS |
+| 3. Worker RSS | ≤ 90% of available for the whole run | max 0.309 (1,226,489,856 bytes) on the killed run; 0.230 on the restart | PASS |
+| 4. error status | ≤ 2% | 4/300 = 1.333% (0 timeouts) | PASS |
