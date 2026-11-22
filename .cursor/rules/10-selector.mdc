@@ -8,8 +8,9 @@ alwaysApply: false
 
 ## Speed (CPU is charged)
 - Python stdlib only. No numpy, no coverage, no pytest, no threads.
-  `IMPORT_CHECK` defaults to on (`IMPORT_CHECK=0` keeps the all-tests fallback). It may run one `python -S`
-  subprocess, cwd `/tmp`, to fingerprint a patched copy of the package. Its CPU is charged.
+  `IMPORT_CHECK` defaults to on (`IMPORT_CHECK=0` keeps the all-tests fallback). On first use it starts
+  one `python -S` worker, cwd `/tmp`, and reuses that process for every later commit. Each request is
+  one JSON line; the worker prepares the patched copy and answers with the fingerprint. Its CPU is charged.
   `EXPENSIVE_CHECK=1` may run a second `python -S` on that same copy to re-optimize the TPC fixture
   queries the changed files actually call. A failed import selects every test. Over 5 s of check CPU,
   the wider selection stands.

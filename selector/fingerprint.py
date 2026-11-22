@@ -7,6 +7,7 @@ import enum
 import hashlib
 import importlib
 import json
+import os
 import pkgutil
 import re
 import sys
@@ -114,5 +115,106 @@ def main():
     sys.stdout.write("\n")
 
 
+def _part(file, name):
+    if isinstance(file, dict):
+        return file[name]
+    return getattr(file, name)
+
+
+def prepare_tree(source_dir, files):
+    """Copy the package to /tmp/s and apply the patch. False when an old file is missing.
+
+    `files` are FilePatch objects or dicts with old, new, binary, and hunks. The copy always
+    starts from `source_dir`, so a later commit does not inherit the previous patch.
+    """
+    import os
+    import shutil
+
+    from patch import apply
+
+    tree = "/tmp/s"
+    if os.path.isdir(tree):
+        shutil.rmtree(tree)
+    shutil.copytree(
+        os.path.join(source_dir, "sqlglot"),
+        os.path.join(tree, "sqlglot"),
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+    )
+    for file in files:
+        path = _part(file, "old") or _part(file, "new")
+        if not path or _part(file, "binary") or not path.startswith("sqlglot/"):
+            continue
+        full = os.path.join(tree, path)
+        if _part(file, "old") is None:
+            os.makedirs(os.path.dirname(full), exist_ok=True)
+            text = ""
+        elif not os.path.isfile(full):
+            return False
+        else:
+            with open(full, encoding="utf-8") as handle:
+                text = handle.read()
+        if _part(file, "new") is None:
+            os.remove(full)
+            continue
+        hunks = _part(file, "hunks")
+        written = apply(text, hunks) if hunks else text
+        with open(full, "w", encoding="utf-8") as handle:
+            handle.write(written)
+    return True
+
+
+def _ensure_import_path():
+    """python -S omits a PYTHONPATH entry that does not exist when the process starts."""
+    for entry in reversed([item for item in os.environ.get("PYTHONPATH", "").split(os.pathsep) if item]):
+        while entry in sys.path:
+            sys.path.remove(entry)
+        sys.path.insert(1, entry)
+
+
+def _unload_sqlglot():
+    """Drop the package so the next import reads the tree this request just wrote."""
+    importlib.invalidate_caches()
+    sys.path_importer_cache.clear()
+    for name in list(sys.modules):
+        if name == "sqlglot" or name.startswith("sqlglot."):
+            del sys.modules[name]
+
+
+def _reply(payload):
+    import io
+
+    held, sys.stdout = sys.stdout, io.StringIO()
+    try:
+        try:
+            request = json.loads(payload)
+            if not prepare_tree(request["source"], request["files"]):
+                body = {"ok": False, "prepared": False}
+            else:
+                try:
+                    _ensure_import_path()
+                    _unload_sqlglot()
+                    body = {"ok": True, "prepared": True, "fp": collect()}
+                except Exception:
+                    body = {"ok": False, "prepared": True}
+        except Exception as error:
+            body = {"raise": type(error).__name__, "msg": str(error)}
+    finally:
+        sys.stdout = held
+    return json.dumps(body, separators=(",", ":")).encode() + b"\n"
+
+
+def serve():
+    """One JSON request per line, one JSON reply per line, until stdin closes."""
+    while True:
+        line = sys.stdin.buffer.readline()
+        if not line:
+            break
+        sys.stdout.buffer.write(_reply(line))
+        sys.stdout.buffer.flush()
+
+
 if __name__ == "__main__":
-    main()
+    if "--worker" in sys.argv:
+        serve()
+    else:
+        main()

@@ -12,12 +12,15 @@ import math
 import os
 import re
 import resource
+import select as _selectmod
 import shutil
 import subprocess
 import sys
+import time
 import tokenize
 
 from classify import classify
+from fingerprint import prepare_tree
 from patch import apply
 
 _DEFINITIONS = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
@@ -1172,32 +1175,8 @@ def _prepare_tree(files, maps):
     """Copy the package to /tmp/s and apply the patch. Reused by both checks."""
     if _TREE_STATE["ready"]:
         return True
-    if os.path.isdir(_TREE):
-        shutil.rmtree(_TREE)
-    shutil.copytree(
-        os.path.join(maps.source_dir, "sqlglot"),
-        os.path.join(_TREE, "sqlglot"),
-        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
-    )
-    for file in files:
-        path = file.old or file.new
-        if not path or file.binary or not path.startswith("sqlglot/"):
-            continue
-        full = os.path.join(_TREE, path)
-        if file.old is None:
-            os.makedirs(os.path.dirname(full), exist_ok=True)
-            text = ""
-        elif not os.path.isfile(full):
-            return False
-        else:
-            with open(full, encoding="utf-8") as handle:
-                text = handle.read()
-        if file.new is None:
-            os.remove(full)
-            continue
-        written = apply(text, file.hunks) if file.hunks else text
-        with open(full, "w", encoding="utf-8") as handle:
-            handle.write(written)
+    if not prepare_tree(maps.source_dir, files):
+        return False
     _TREE_STATE["ready"] = True
     return True
 
@@ -1226,16 +1205,136 @@ def _json_out(stdout):
     return json.loads(stdout[start:])
 
 
-def _patched_fingerprint(files, maps, keep=False):
-    """Copy the package, apply the patch, import it. None means the import did not survive."""
+_WORKER = None
+_WORKER_BUF = b""
+
+
+def _file_payload(files):
+    return [
+        {"old": file.old, "new": file.new, "binary": file.binary, "hunks": file.hunks}
+        for file in files
+    ]
+
+
+def _ensure_worker():
+    """The fingerprint interpreter, started on the first check and kept for later commits."""
+    global _WORKER, _WORKER_BUF
+    if _WORKER is not None and _WORKER.poll() is None:
+        return _WORKER
+    if _WORKER is not None:
+        try:
+            _WORKER.wait(timeout=1)
+        except subprocess.TimeoutExpired:
+            _WORKER.kill()
+            _WORKER.wait()
     script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fingerprint.py")
+    _WORKER_BUF = b""
+    _WORKER = subprocess.Popen(
+        [sys.executable, "-S", script, "--worker"],
+        cwd="/tmp",
+        env=_python_env(),
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        bufsize=0,
+    )
+    return _WORKER
+
+
+def _kill_worker():
+    global _WORKER, _WORKER_BUF
+    proc, _WORKER, _WORKER_BUF = _WORKER, None, b""
+    if proc is None:
+        return
+    if proc.poll() is None:
+        proc.kill()
+    proc.wait()
+
+
+def close_fingerprint_worker():
+    """Reap the worker so its CPU is included in the children's rusage."""
+    global _WORKER, _WORKER_BUF
+    proc, _WORKER, _WORKER_BUF = _WORKER, None, b""
+    if proc is None:
+        return
+    if proc.poll() is None:
+        try:
+            proc.stdin.close()
+        except OSError:
+            pass
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+    else:
+        proc.wait()
+
+
+def _read_worker_line(proc, timeout):
+    global _WORKER_BUF
+    deadline = time.monotonic() + timeout
+    while b"\n" not in _WORKER_BUF:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            _kill_worker()
+            raise subprocess.TimeoutExpired(proc.args, timeout)
+        ready, _, _ = _selectmod.select([proc.stdout], [], [], remaining)
+        if not ready:
+            _kill_worker()
+            raise subprocess.TimeoutExpired(proc.args, timeout)
+        chunk = os.read(proc.stdout.fileno(), 1 << 20)
+        if not chunk:
+            return None
+        _WORKER_BUF += chunk
+    line, _, _WORKER_BUF = _WORKER_BUF.partition(b"\n")
+    return line
+
+
+def _reraise(reply):
+    import builtins
+
+    name, msg = reply.get("raise", "OSError"), reply.get("msg", "")
+    exc_type = getattr(builtins, name, None)
+    if isinstance(exc_type, type) and issubclass(exc_type, Exception):
+        try:
+            raise exc_type(msg)
+        except TypeError:
+            raise ValueError(msg) from None
+    raise OSError(msg)
+
+
+def _ask_worker(payload, timeout=30):
+    body = json.dumps(payload, separators=(",", ":")).encode() + b"\n"
+    proc = _ensure_worker()
     try:
-        if not _prepare_tree(files, maps):
+        proc.stdin.write(body)
+        proc.stdin.flush()
+    except (BrokenPipeError, OSError):
+        _kill_worker()
+        proc = _ensure_worker()
+        proc.stdin.write(body)
+        proc.stdin.flush()
+    line = _read_worker_line(proc, timeout)
+    if line is None:
+        _kill_worker()
+        return None
+    return json.loads(line)
+
+
+def _patched_fingerprint(files, maps, keep=False):
+    """Ask the worker to patch a fresh tree and fingerprint it. None means the import did not survive."""
+    try:
+        reply = _ask_worker({"source": maps.source_dir, "files": _file_payload(files)})
+        if reply is None:
             return None
-        proc = _run_python(script)
-        if proc.returncode != 0:
+        if "raise" in reply:
+            _reraise(reply)
+        if reply.get("prepared"):
+            _TREE_STATE["ready"] = True
+        if not reply.get("ok"):
             return None
-        return _json_out(proc.stdout)
+        return reply.get("fp")
     finally:
         if not keep:
             _cleanup_tree()

@@ -13,7 +13,7 @@ import sys
 
 from pack import pack
 from patch import parse
-from rules import Maps, select
+from rules import Maps, close_fingerprint_worker, select
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -78,6 +78,7 @@ def main():
     if answers:
         sys.stdout.write("\n".join(answers) + "\n")
     sys.stdout.flush()
+    close_fingerprint_worker()
     used = [resource.getrusage(who) for who in (resource.RUSAGE_SELF, resource.RUSAGE_CHILDREN)]
     log(f"cpu_seconds {sum(u.ru_utime + u.ru_stime for u in used):.3f}")
 
