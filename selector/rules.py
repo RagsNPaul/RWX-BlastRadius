@@ -8,6 +8,7 @@ import ast
 import copy
 import io
 import json
+import math
 import os
 import re
 import resource
@@ -74,6 +75,11 @@ def _dialect_file_off():
     return os.environ.get("DIALECT_FILE_OFF", "0") == "1"
 
 
+def _slow_policy():
+    """Drop the slow parser, generator, and TPC tests last. SLOW_POLICY=0 keeps them."""
+    return os.environ.get("SLOW_POLICY", "1") == "1"
+
+
 _SLOW_MS = 3000
 _WORD_SLOW_MS = 1000
 _CLASS_CAP = 400
@@ -106,7 +112,9 @@ class Maps:
         self._sets = self._blind = self._tests = self._importers = self._words = self._enums = None
         self._scalars = {}
         self._lines, self._imported, self._sources = {}, {}, {}
-        self._import_fp = self._tpc = self._max_lines = None
+        self._import_fp = self._tpc = self._max_lines = self._risk = None
+        self._line_counts = self._test_path = None
+        self.by_id = {}
 
     def check(self, tests):
         """The maps are keyed by test number: refuse a tests.json that numbers tests differently."""
@@ -116,6 +124,7 @@ class Maps:
         for test in tests:
             if test["number"] not in files.get(test["file"], ()):
                 raise ValueError(f"test {test['number']} is not in {test['file']} in the maps")
+        self.by_id = {test["id"]: test["number"] for test in tests}
         self._load_classes(tests)
 
     def tpc(self):
@@ -131,6 +140,39 @@ class Maps:
             with open(os.path.join(self.maps_dir, "max_nodes_lines.json"), encoding="utf-8") as handle:
                 self._max_lines = set(json.load(handle))
         return self._max_lines
+
+    def line_counts(self):
+        """How many mapped lines each test ran. Built once from the pinned line maps."""
+        if self._line_counts is None:
+            counts = [0] * len(self.durations)
+            root = os.path.join(self.maps_dir, "lines")
+            for dirpath, _dirs, names in os.walk(root):
+                for name in names:
+                    if not name.endswith(".json"):
+                        continue
+                    with open(os.path.join(dirpath, name)) as handle:
+                        table = json.load(handle)
+                    for index in table.values():
+                        for number in self.tests_of(index):
+                            counts[number] += 1
+            self._line_counts = counts
+        return self._line_counts
+
+    def test_path(self, number):
+        if self._test_path is None:
+            found = {}
+            for path, numbers in self.testfile.items():
+                for test in numbers:
+                    found.setdefault(test, path)
+            self._test_path = found
+        return self._test_path.get(number, "")
+
+    def risk_weights(self):
+        """Eight logistic weights: intercept plus the seven risk features."""
+        if self._risk is None:
+            with open(os.path.join(self.maps_dir, "risk.json"), encoding="utf-8") as handle:
+                self._risk = [float(value) for value in json.load(handle)]
+        return self._risk
 
     def tests_of(self, index):
         if self._sets is None:
@@ -1586,6 +1628,239 @@ def _drop_expensive(selected, files, maps, blame, import_failed):
         return [], _cpu_seconds() - start
 
 
+def _risk_threshold():
+    """RISK=<p> drops the least likely failures while their probabilities sum to less than p."""
+    raw = os.environ.get("RISK", "")
+    if not raw:
+        return None
+    try:
+        return float(raw)
+    except ValueError:
+        return None
+
+
+_FIXTURE_RULES = frozenset({"data", "py-read", "testfile"})
+
+
+def _rule_kind(rule):
+    """0 line, 1 class-level, 2 import-time, 3 fixture. None if the note is not one of these."""
+    if rule in _FIXTURE_RULES:
+        return 3
+    if rule in {"all:import-line", "all:import-class", "all:import-unmapped", "import->file"}:
+        return 2
+    if rule == "class":
+        return 1
+    if rule in {"line", "word", "neighbor", "dialect", "blind", "docstring"}:
+        return 0
+    return None
+
+
+def _condition_lines(tree):
+    """Lines that belong to an if/elif test, not the body under it."""
+    found = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.If):
+            continue
+        test = node.test
+        start = getattr(test, "lineno", None)
+        end = getattr(test, "end_lineno", start)
+        if start is None:
+            continue
+        found.update(range(start, end + 1))
+    return found
+
+
+def _name_match(paths, test_file):
+    """1 when duckdb.py matches test_duckdb.py, or optimizer/x.py matches test_optimizer.py."""
+    stem = os.path.basename(test_file)
+    if stem.startswith("test_") and stem.endswith(".py"):
+        stem = stem[len("test_"):-len(".py")]
+    else:
+        return 0.0
+    for path in paths:
+        base = os.path.basename(path)
+        if base.endswith(".py"):
+            base = base[:-len(".py")]
+        parent = os.path.basename(os.path.dirname(path))
+        if stem == base or stem == parent:
+            return 1.0
+    return 0.0
+
+
+def _changed_coverage(files, maps):
+    """Changed lines the coverage map knows, as (tests, how many tests, condition?)."""
+    rows, paths = [], []
+    for file in files:
+        for path in (file.old, file.new):
+            if path:
+                paths.append(path)
+        path = file.old
+        if not path or file.binary or not file.hunks or not path.endswith(".py"):
+            continue
+        try:
+            text, tree, _dump = maps.source(path)
+        except OSError:
+            continue
+        line_count = len(text.split("\n"))
+
+        def unit(line, _tree=tree):
+            return _unit(_tree, line)
+
+        changed, _neighbors = _changed(file.hunks, unit, line_count)
+        skip = set()
+        if _equiv_enum():
+            try:
+                new_tree = ast.parse(apply(text, file.hunks).encode("utf-8"))
+                old_lines = text.split("\n")
+                skip = _equivalent_lines(
+                    tree, new_tree, file.hunks, old_lines, changed, unit,
+                    maps.enum_names(path), maps.scalar_names(path),
+                )
+            except (SyntaxError, ValueError, UnicodeError):
+                skip = set()
+        conditions = _condition_lines(tree)
+        table = maps.lines(path)
+        for line in changed:
+            if line in skip:
+                continue
+            index = table.get(str(line))
+            if index is None:
+                continue
+            numbers = set(maps.tests_of(index))
+            rows.append((numbers, len(numbers), line in conditions))
+    return rows, paths
+
+
+def risk_features(files, maps, blame, tests):
+    """Seven features for each candidate, in the order maps/risk.json was fit on.
+
+    changed lines covered, log tests on those lines, log lines this test covers,
+    name match, change kind (0 line, 1 class, 2 import-time, 3 fixture),
+    log duration, condition line.
+    """
+    covered, paths = _changed_coverage(files, maps)
+    breadth = maps.line_counts()
+    kind = {}
+    for rule, _where, numbers in blame or []:
+        code = _rule_kind(rule)
+        if code is None:
+            continue
+        for number in numbers:
+            if code > kind.get(number, -1):
+                kind[number] = code
+    features = {}
+    for test in tests:
+        hits = [(size, cond) for numbers, size, cond in covered if test in numbers]
+        count = len(hits)
+        if count:
+            spread = math.log1p(sum(size for size, _cond in hits) / count)
+            condition = 1.0 if any(cond for _size, cond in hits) else 0.0
+        else:
+            spread = 0.0
+            condition = 0.0
+        features[test] = (
+            float(count),
+            spread,
+            math.log1p(breadth[test] if test < len(breadth) else 0),
+            _name_match(paths, maps.test_path(test)),
+            float(kind.get(test, 0)),
+            math.log1p(maps.durations[test] if test < len(maps.durations) else 0),
+            condition,
+        )
+    return features
+
+
+def fail_probability(weights, features):
+    score = weights[0]
+    for weight, value in zip(weights[1:], features):
+        score += weight * value
+    if score >= 0:
+        return 1.0 / (1.0 + math.exp(-score))
+    expo = math.exp(score)
+    return expo / (1.0 + expo)
+
+
+def _apply_risk(selected, files, maps, blame, threshold):
+    """Drop the lowest P(fail) tests while their probabilities stay under the threshold."""
+    try:
+        weights = maps.risk_weights()
+    except (OSError, json.JSONDecodeError, TypeError, ValueError):
+        return None
+    if len(weights) != 8 or not selected:
+        return None
+    protected = set()
+    for rule, _where, numbers in blame or []:
+        if rule in _FIXTURE_RULES:
+            protected.update(number for number in numbers if number in selected)
+    droppable = [test for test in selected if test not in protected]
+    if not droppable:
+        return None
+    scored = []
+    for test, features in risk_features(files, maps, blame, droppable).items():
+        scored.append((fail_probability(weights, features), test))
+    scored.sort()
+    total = 0.0
+    dropped = []
+    for probability, test in scored:
+        if total + probability >= threshold:
+            break
+        emptying = not protected and len(dropped) + 1 == len(scored)
+        if emptying and total + probability >= threshold / 3:
+            break
+        total += probability
+        dropped.append(test)
+    for test in dropped:
+        selected.discard(test)
+    if not dropped:
+        return None
+    return f"risk={len(dropped)}:{total:.3f}"
+
+
+_ALWAYS_SLOW = (
+    ("tests/test_parser.py::TestParser::test_max_nodes", "max_nodes"),
+    ("tests/test_generator.py::TestGenerator::test_generator_memory", "gen_mem"),
+)
+_TPC_SLOW = (
+    ("tests/test_executor.py::TestExecutor::test_execute_tpcds", "tpcds"),
+    ("tests/test_executor.py::TestExecutor::test_execute_tpch", "tpch"),
+    ("tests/test_executor.py::TestExecutor::test_optimized_tpch", "opt_tpch"),
+)
+_TPC_KEEP_PREFIXES = ("sqlglot/optimizer/", "sqlglot/executor/", "sqlglot/planner")
+
+
+def _tpc_kept(files):
+    """The TPC executor tests stay when a changed path can reach their SQL."""
+    for file in files:
+        for path in (file.old, file.new):
+            if not path:
+                continue
+            if path == "sqlglot/serde.py" or "tpc" in path or path.startswith(_TPC_KEEP_PREFIXES):
+                return True
+    return False
+
+
+def _apply_slow_policy(selected, files, maps, reasons):
+    """Last step. A failed import or fingerprint (any `all:` reason) keeps every slow test."""
+    if not _slow_policy() or any("all:" in reason for reason in reasons):
+        return None
+    by_id = maps.by_id
+    if not by_id:
+        return None
+    names = []
+    for nodeid, name in _ALWAYS_SLOW:
+        number = by_id.get(nodeid)
+        if number is not None and number in selected:
+            selected.discard(number)
+            names.append(name)
+    if not _tpc_kept(files):
+        for nodeid, name in _TPC_SLOW:
+            number = by_id.get(nodeid)
+            if number is not None and number in selected:
+                selected.discard(number)
+                names.append(name)
+    return "slow=" + "+".join(names) if names else None
+
+
 def select(files, maps, blame=None):
     """-> (test numbers, [reason per file]): the union over the files of one patch.
 
@@ -1594,7 +1869,7 @@ def select(files, maps, blame=None):
     """
     selected, reasons = set(), []
     box = {}
-    record = blame if blame is not None else ([] if _expensive_check() else None)
+    record = blame if blame is not None else ([] if _expensive_check() or _risk_threshold() is not None else None)
 
     def check():
         if "value" not in box:
@@ -1610,7 +1885,7 @@ def select(files, maps, blame=None):
                 selected.update(tests)
                 reasons.append(reason)
                 done = len(selected) == len(maps.everything)
-            if done and not _expensive_check():
+            if done and not _expensive_check() and _risk_threshold() is None:
                 break
         if "value" in box:
             reasons.append(f"check={box['value'][2]:.3f}s")
@@ -1620,6 +1895,14 @@ def select(files, maps, blame=None):
             if dropped:
                 reasons.append("drop=" + "+".join(dropped))
             reasons.append(f"xcheck={cpu:.3f}s")
+        threshold = _risk_threshold()
+        if threshold is not None and threshold > 0:
+            note = _apply_risk(selected, files, maps, record or [], threshold)
+            if note:
+                reasons.append(note)
+        note = _apply_slow_policy(selected, files, maps, reasons)
+        if note:
+            reasons.append(note)
     finally:
         _cleanup_tree()
     return selected, reasons

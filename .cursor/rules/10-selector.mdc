@@ -63,6 +63,14 @@ patch.py → classify.py → rules.py → pack.py → main.py
      that call a changed file. `test_max_nodes` stays for `parser.py`, `tokens.py`,
      `tokenizer_core.py`, `expressions/core.py`, or a line in `maps/max_nodes_lines.json`.
      `test_generator_memory` stays for `generator.py` or `expressions/core.py`.
+     `RISK=<p>` scores each candidate with the eight weights in `maps/risk.json` and drops the
+     lowest P(fail) while the dropped probabilities sum to less than `p`. Fixture-rule tests
+     stay. A non-empty selection is emptied only when that sum is below `p/3`.
+     `SLOW_POLICY` defaults to on and runs last. It drops `test_max_nodes` and
+     `test_generator_memory`, and drops the three TPC executor tests unless a changed path
+     starts with `sqlglot/optimizer/`, `sqlglot/executor/`, or `sqlglot/planner`, is
+     `sqlglot/serde.py`, or contains `tpc`. A commit reason containing `all:` keeps them.
+     The five tests are resolved from `tests.json` ids.
    - module-level code (not in a class) keeps `file_union`; if tests also ran it → every test
 5. Line never executed → nothing.
 6. Docstring changed → doctest-running tests, if any exist (look in tests/ for doctest usage).

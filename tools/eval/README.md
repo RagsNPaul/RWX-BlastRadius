@@ -20,6 +20,10 @@ Paths are flags. `make eval` runs ground truth, then the scorer.
   plus a blended board estimate. Later reports keep the holdout separate.
   Truths that list `test_max_nodes` or `test_execute_tpcds` are remeasured in the
   pinned image with `gt.py --timeout=600 -n 4`.
+- `risk_model.py --sqlglot DIR --python PY --tests sample/tests.json --bank bank --maps maps`
+  Fits a logistic model of P(fail) on the safe selector's candidates from the sample and the
+  non-holdout bank. Writes eight weights to `maps/risk.json` and prints holdout AUC, five-bin
+  calibration, and sample/holdout seconds at `RISK` 0.01, 0.03, 0.05, and 0.10.
 - `rule_cost.py --sqlglot DIR --python PY --tests sample/tests.json --bank bank --maps maps`
   For every sample, holdout, and bank commit, packing seconds that line, class, word,
   neighbor, and dialect-file coverage added beyond the true failures. Then each of
