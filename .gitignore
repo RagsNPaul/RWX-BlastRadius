@@ -5,3 +5,8 @@ __pycache__/
 .coverage*
 *.pkl
 bank/logs/
+_snap/
+prototype/
+maps/trace.json
+mutmap/
+bank/logs/
