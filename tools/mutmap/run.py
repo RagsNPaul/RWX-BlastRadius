@@ -102,12 +102,12 @@ def _select(ops: list[tuple[str, str]], which: int) -> list[tuple[str, str]]:
     return ops[1:3]
 
 
-def build_jobs(root: Path, which: int, done: set[tuple[str, int, str]], limit: int | None) -> list[tuple]:
+def iter_jobs(root: Path, which: int, done: set[tuple[str, int, str]], limit: int | None):
+    """Yield mutants in queue order. `produced` counts resumed rows toward `limit`."""
     checkout = root / "sqlglot"
     sources: dict[str, str] = {}
     dumps: dict[str, str] = {}
     produced = 0
-    jobs = []
     for rel, line_no, _cost, covering in _ordered_lines(root):
         if rel not in sources:
             file_path = checkout / rel
@@ -123,14 +123,13 @@ def build_jobs(root: Path, which: int, done: set[tuple[str, int, str]], limit: i
             if _accepts(dumps, rel, sources[rel], line_no, new_line)
         ]
         for op, new_line in _select(valid, which):
-            key = (rel, line_no, op)
             if limit is not None and produced >= limit:
-                return jobs
+                return
             produced += 1
+            key = (rel, line_no, op)
             if key in done:
                 continue
-            jobs.append((rel, line_no, op, new_line, covering))
-    return jobs
+            yield (rel, line_no, op, new_line, covering)
 
 
 def _status_of(report: dict, covering: list[int]) -> tuple[str, list[int]]:
@@ -206,12 +205,16 @@ def _rss_tree(pids: list[int]) -> int:
     return total
 
 
-def _past_until(until: str, started: datetime) -> bool:
+def _deadline(until: str, started: datetime) -> datetime:
     hour, minute = (int(part) for part in until.split(":"))
     stop = started.replace(hour=hour, minute=minute, second=0, microsecond=0)
     if stop <= started:
         stop += timedelta(days=1)
-    return datetime.now() >= stop
+    return stop
+
+
+def _past_until(until: str, started: datetime) -> bool:
+    return datetime.now() >= _deadline(until, started)
 
 
 def _write(handle, row: dict) -> None:
@@ -229,10 +232,18 @@ def run(args: argparse.Namespace) -> int:
     out.parent.mkdir(parents=True, exist_ok=True)
     done = _load_done(out)
     print(f"queue pass={args.pass_n} already={len(done)}", flush=True)
-    jobs = build_jobs(root, args.pass_n, done, args.limit)
-    print(f"queued {len(jobs)}", flush=True)
-    if not jobs:
-        return 0
+    jobs = iter_jobs(root, args.pass_n, done, args.limit)
+    exhausted = False
+
+    def pull():
+        nonlocal exhausted
+        if exhausted:
+            return None
+        try:
+            return next(jobs)
+        except StopIteration:
+            exhausted = True
+            return None
 
     ctx = mp.get_context("spawn")
     job_q = ctx.Queue()
@@ -266,14 +277,17 @@ def run(args: argparse.Namespace) -> int:
     window = args.workers * 2
     handle = out.open("a", encoding="utf-8")
     try:
-        while finished < len(jobs) and not stop["flag"]:
+        while not stop["flag"]:
             if _past_until(args.until, started):
                 print("until reached", flush=True)
                 break
-            while submitted < len(jobs) and submitted - finished < window and not stop["flag"]:
-                job_q.put(jobs[submitted])
+            while submitted - finished < window and not stop["flag"]:
+                job = pull()
+                if job is None:
+                    break
+                job_q.put(job)
                 submitted += 1
-            if finished >= submitted:
+            if exhausted and finished >= submitted:
                 break
             try:
                 row = result_q.get(timeout=1.0)
@@ -298,8 +312,7 @@ def run(args: argparse.Namespace) -> int:
             if finished % 100 == 0:
                 elapsed = max(time.perf_counter() - clock, 1e-6)
                 rate = finished / elapsed * 3600.0
-                remaining = len(jobs) - finished
-                eta = remaining / (finished / elapsed)
+                eta = max(0.0, (_deadline(args.until, started) - datetime.now()).total_seconds())
                 print(
                     f"progress done={len(done) + finished} lines_per_hour={rate:.1f} "
                     f"eta_s={eta:.1f} rss_bytes={rss} rss_frac={frac:.3f}",
