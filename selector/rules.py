@@ -35,6 +35,11 @@ def _equiv_enum():
     return os.environ.get("EQUIV_ENUM", "1") == "1"
 
 
+def _equiv_cmp_all():
+    """Every is↔== and is not↔!= swap is the same statement. EQUIV_CMP_ALL=0 restores the type check."""
+    return os.environ.get("EQUIV_CMP_ALL", "1") == "1"
+
+
 def _equiv_dead():
     """A change that stays inside a body no test runs is not a change. EQUIV_DEAD=0 keeps it."""
     return os.environ.get("EQUIV_DEAD", "1") == "1"
@@ -78,6 +83,10 @@ def _dialect_file_off():
 def _slow_policy():
     """Drop the slow parser, generator, and TPC tests last. SLOW_POLICY=0 keeps them."""
     return os.environ.get("SLOW_POLICY", "1") == "1"
+
+
+def _dict_key():
+    return os.environ.get("DICT_KEY", "1") == "1"
 
 
 def _sens():
@@ -894,16 +903,19 @@ def _none_operand_ok(node, tree, line, scalars):
 
 
 def _enum_equivalent(old, new, names, tree, line, scalars):
-    """The statements differ only by is↔== or is not↔!= on a plain Enum, or on None.
+    """The statements differ only by is↔== or is not↔!=.
 
-    None applies only when the other operand is a str, int, bool, Token, or TokenType in this
-    function. An enum that overrides equality is not in `names`.
+    EQUIV_CMP_ALL accepts every such swap, including None and a str-Enum, with no type check.
+    Otherwise None applies only when the other operand is a str, int, bool, Token, or TokenType
+    in this function, and an enum that overrides equality is not in `names`.
     """
     if ast.dump(_canon_compare(old)) != ast.dump(_canon_compare(new)):
         return False
     swaps = _swapped_compares(old, new)
     if not swaps:
         return False
+    if _equiv_cmp_all():
+        return True
     for left, right in swaps:
         sides = [left.left, *left.comparators]
         for index, (before, after) in enumerate(zip(left.ops, right.ops)):
@@ -1245,18 +1257,90 @@ def _run_import_check(files, maps, keep=False):
         return "all", (), _cpu_seconds() - start
 
 
+def _class_dicts(tree):
+    """Every dict literal assigned in a class body (nested classes included), not inside functions."""
+    found = []
+
+    def walk(body):
+        for node in body:
+            if isinstance(node, ast.ClassDef):
+                walk(node.body)
+            elif isinstance(node, (ast.Assign, ast.AnnAssign)) and isinstance(node.value, ast.Dict):
+                found.append(node.value)
+
+    walk(tree.body)
+    return found
+
+
+def _dict_entry_tests(path, tree, hunks, maps):
+    """DICT_KEY: when every edited line sits in one entry of a class-level dict whose value runs at
+    runtime (a lambda or call), the tests that ran those values. None when any line is something else."""
+    changed, added = set(), []
+    for rows in hunks:
+        minus = [number for kind, number, _row in rows if kind == "-"]
+        if not minus:
+            return None  # a pure insertion adds an entry; keep the wider rule
+        changed.update(minus)
+        added.extend(row for kind, _number, row in rows if kind == "+")
+    dicts = _class_dicts(tree)
+    table = maps.lines(path)
+    tests, used = set(), []
+    for line in changed:
+        hit = None
+        for node in dicts:
+            for key, value in zip(node.keys, node.values):
+                if key is None or not (isinstance(key, ast.Constant) and isinstance(key.value, str)):
+                    continue
+                if key.lineno <= line <= value.end_lineno:
+                    hit = (node, key, value)
+                    break
+            if hit:
+                break
+        if hit is None:
+            return None
+        node, key, value = hit
+        if not isinstance(value, (ast.Lambda, ast.Call)):
+            return None  # plain data runs only at import; coverage cannot see who reads it
+        covered = False
+        for number in range(value.lineno, value.end_lineno + 1):
+            index = table.get(str(number))
+            if index is not None:
+                covered = True
+                tests.update(maps.tests_of(index))
+        if not covered:
+            return None
+        used.append(node)
+    # a renamed key that now equals another key of the same dict shadows that entry
+    new_keys = set(re.findall(r'"([^"\\]+)"\s*:', "\n".join(added)))
+    for node in used:
+        for key, value in zip(node.keys, node.values):
+            if isinstance(key, ast.Constant) and key.value in new_keys:
+                for number in range(value.lineno, value.end_lineno + 1):
+                    index = table.get(str(number))
+                    if index is not None:
+                        tests.update(maps.tests_of(index))
+    return tests
+
+
 # --- rules 1-6: sqlglot/**/*.py -------------------------------------------------------------
 def _source(path, hunks, maps, blame=None, check=None):
     tests = set(maps.py_reads.get(path, ()))  # rule 7 also holds for a source that tests read as text
     _note(blame, "py-read", path, tests)
     narrowed_import = False
 
-    def keep_all():
+    def keep_all(dict_ok=False):
         """False when the import fingerprint changed only inside a class this patch edited."""
         nonlocal narrowed_import
         if check is None:
             return True
         decision, classes, _cpu = check()
+        if decision == "all" and dict_ok and _dict_key():
+            extra = _dict_entry_tests(path, tree, hunks, maps)
+            if extra is not None:
+                narrowed_import = True
+                tests.update(extra)
+                _note(blame, "dict-key", path, extra)
+                return False
         if decision != "narrow":
             return True
         narrowed_import = True
@@ -1297,7 +1381,7 @@ def _source(path, hunks, maps, blame=None, check=None):
     doc_spans, class_spans, union_where, word_at = [], {}, [], {}
     changed, neighbor_lines = _changed(hunks, unit, len(old_lines))
     skip = set()
-    if _equiv_enum():
+    if _equiv_cmp_all() or _equiv_enum():
         skip = _equivalent_lines(
             tree, new_tree, hunks, old_lines, changed, unit, maps.enum_names(path), maps.scalar_names(path)
         )
@@ -1381,7 +1465,7 @@ def _source(path, hunks, maps, blame=None, check=None):
     need_union = module_import
     for key in class_keys:
         if key in maps.import_classes:
-            if keep_all():
+            if keep_all(dict_ok=True):
                 for other in class_keys:
                     if other in maps.import_classes:
                         for where in _span_wheres(path, class_spans.get(other)):
@@ -1748,7 +1832,7 @@ def _changed_coverage(files, maps):
 
         changed, _neighbors = _changed(file.hunks, unit, line_count)
         skip = set()
-        if _equiv_enum():
+        if _equiv_cmp_all() or _equiv_enum():
             try:
                 new_tree = ast.parse(apply(text, file.hunks).encode("utf-8"))
                 old_lines = text.split("\n")

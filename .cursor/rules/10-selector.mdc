@@ -24,12 +24,11 @@ patch.py → classify.py → rules.py → pack.py → main.py
 
 ## Selection rules, in this order. The union across all files of a patch is selected.
 1. `sqlglot/**/*.py` with `ast.dump(old) == ast.dump(new)` (comment/whitespace only) → nothing.
-   `EQUIV_ENUM` defaults to on. A statement whose only AST difference is `is`↔`==` or `is not`↔`!=`
-   on an attribute of an Enum that does not override equality (`maps/enums.json`) is the same.
-   `is None`↔`== None` counts too, only when the other name is annotated or assigned in that
-   function as `str`, `int`, `bool`, `Token`, or `TokenType`. Anything else, including an
-   `Expression`, stays a real change. `IntEnum` and `str` mixins stay real changes for `is`↔`==`
-   against a member.
+   `EQUIV_CMP_ALL` defaults to on. A statement whose only AST difference is `is`↔`==` or
+   `is not`↔`!=` is the same, including a comparison with `None` or a str-Enum, with no type check.
+   `EQUIV_CMP_ALL=0` restores `EQUIV_ENUM`: the swap counts only on an attribute of an Enum that
+   does not override equality (`maps/enums.json`), or on `None` when the other name is annotated
+   or assigned in that function as `str`, `int`, `bool`, `Token`, or `TokenType`.
    `EQUIV_DEAD` defaults to on (`EQUIV_DEAD=0` keeps the line). Every changed line is in an
    if/elif/else/except/loop body that no test runs (no line-map entry, not an import line), and
    the condition line is untouched → nothing for that file. A body that still has a covered line stays.
