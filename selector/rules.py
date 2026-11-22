@@ -57,7 +57,7 @@ def _expensive_check():
 
 def _word_no_expensive():
     """The word rule may not add a test that takes over 1s. WORD_NO_EXPENSIVE=0 keeps them."""
-    return os.environ.get("WORD_NO_EXPENSIVE", "0") == "1"
+    return os.environ.get("WORD_NO_EXPENSIVE", "1") == "1"
 
 
 def _word_off():
@@ -72,7 +72,7 @@ def _class_cap():
 
 def _neighbor_off():
     """A pure insertion maps to the statement it lands in, not the statements on both sides."""
-    return os.environ.get("NEIGHBOR_OFF", "0") == "1"
+    return os.environ.get("NEIGHBOR_OFF", "1") == "1"
 
 
 def _dialect_file_off():
@@ -91,12 +91,12 @@ def _dict_key():
 
 def _sens():
     """Replace a mapped function line's coverage tests with its sensitivity set. SENS=0 keeps coverage."""
-    return os.environ.get("SENS", "0") == "1"
+    return os.environ.get("SENS", "1") == "1"
 
 
 def _sens_clean():
     """A clean mapped line adds no tests. SENS_CLEAN=0 still uses its sensitivity set."""
-    return os.environ.get("SENS_CLEAN", "0") == "1"
+    return os.environ.get("SENS_CLEAN", "1") == "1"
 
 
 _SLOW_MS = 3000
@@ -1411,6 +1411,11 @@ def _source(path, hunks, maps, blame=None, check=None):
         if use_sens is not None:
             numbers, clean = use_sens
             chosen = set() if _sens_clean() and clean else set(numbers)
+            # the map never ran tests over 3 s: keep the slow tests coverage picks (SLOW_POLICY may drop them later)
+            for number in range(first, last + 1):
+                index = table.get(str(number))
+                if index is not None:
+                    chosen.update(t for t in maps.tests_of(index) if maps.durations[t] > 3000)
             sens_direct.update(chosen)
             if blame is not None and chosen:
                 _note(blame, "line", _where(path, first, last), chosen)
