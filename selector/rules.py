@@ -80,6 +80,16 @@ def _slow_policy():
     return os.environ.get("SLOW_POLICY", "1") == "1"
 
 
+def _sens():
+    """Replace a mapped function line's coverage tests with its sensitivity set. SENS=0 keeps coverage."""
+    return os.environ.get("SENS", "0") == "1"
+
+
+def _sens_clean():
+    """A clean mapped line adds no tests. SENS_CLEAN=0 still uses its sensitivity set."""
+    return os.environ.get("SENS_CLEAN", "0") == "1"
+
+
 _SLOW_MS = 3000
 _WORD_SLOW_MS = 1000
 _CLASS_CAP = 400
@@ -112,6 +122,7 @@ class Maps:
         self._sets = self._blind = self._tests = self._importers = self._words = self._enums = None
         self._scalars = {}
         self._lines, self._imported, self._sources = {}, {}, {}
+        self._sens, self._sens_sets = {}, None
         self._import_fp = self._tpc = self._max_lines = self._risk = None
         self._line_counts = self._test_path = None
         self.by_id = {}
@@ -226,6 +237,26 @@ class Maps:
         """Local names of Token and TokenType. `== None` matches `is None` for these."""
         self._load_enums()
         return self._scalars.get(path, frozenset())
+
+    def sens_entry(self, path, line):
+        """(test numbers, clean) for a function line, or None when SENS is off or the line is unmapped."""
+        if not _sens():
+            return None
+        if path not in self._sens:
+            file = os.path.join(self.maps_dir, "sens", path + ".json")
+            table = {}
+            if os.path.exists(file):
+                with open(file) as f:
+                    table = json.load(f)
+            self._sens[path] = table
+        row = self._sens[path].get(str(line))
+        if row is None:
+            return None
+        index, clean = row
+        if self._sens_sets is None:
+            with open(os.path.join(self.maps_dir, "sens_sets.json")) as f:
+                self._sens_sets = json.load(f)
+        return self._sens_sets[index], int(clean)
 
     def lines(self, path):
         """{"line": set index}: the tests that ran the statement a line belongs to."""
@@ -1262,6 +1293,7 @@ def _source(path, hunks, maps, blame=None, check=None):
     table, imported = maps.lines(path), maps.imported(path)
     indexes, at_import, docstring = set(), False, False
     class_keys, import_ran, module_import = set(), False, False
+    sens_direct = set()
     doc_spans, class_spans, union_where, word_at = [], {}, [], {}
     changed, neighbor_lines = _changed(hunks, unit, len(old_lines))
     skip = set()
@@ -1281,17 +1313,24 @@ def _source(path, hunks, maps, blame=None, check=None):
             if blame is not None and is_doc:
                 doc_spans.append((first, last))
         inside = isinstance(node, ast.Lambda) and _within_lambda_body(node, line, old_lines[line - 1], new)
+        use_sens = maps.sens_entry(path, line) if _sens() and _in_function(tree, line) else None
         covered, span_import = False, False
         for number in range(first, last + 1):
             index = table.get(str(number))
-            if index is not None:
+            if index is not None and use_sens is None:
                 indexes.add(index)  # rule 3: tests that ran the statement
                 covered = True
             if number in imported:
                 span_import = True
                 if not inside:
                     at_import = True  # rule 4: it also runs when the module is imported
-        if blame is not None and covered:
+        if use_sens is not None:
+            numbers, clean = use_sens
+            chosen = set() if _sens_clean() and clean else set(numbers)
+            sens_direct.update(chosen)
+            if blame is not None and chosen:
+                _note(blame, "line", _where(path, first, last), chosen)
+        elif blame is not None and covered:
             found = set()
             for number in range(first, last + 1):
                 index = table.get(str(number))
@@ -1334,7 +1373,8 @@ def _source(path, hunks, maps, blame=None, check=None):
             _note(blame, "neighbor", path, only)
     for index in indexes:
         tests.update(maps.tests_of(index))
-    reason = "line" if indexes else "uncovered"  # rule 5: a line that never ran selects nothing
+    tests.update(sens_direct)
+    reason = "line" if indexes or sens_direct else "uncovered"  # rule 5: a line that never ran selects nothing
     edits, word_bag, narrowed = None, set(), False
     # file_union stays for module-level import lines, for a class with no inst entry, and when
     # a changed literal is not a word. A class created at import still selects every test.
